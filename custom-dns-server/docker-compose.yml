@@ -1,0 +1,40 @@
+services:
+  dns-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5354:5354/udp"  # DNS server port
+      - "8053:8053"  # HTTP API port
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+    depends_on:
+      - redis
+    networks:
+      - dns-network
+    volumes:
+      - ./config:/app/config
+      - ./lib:/app/lib
+      - ./api:/app/api
+      - ./server:/app/server
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - dns-network
+    command: redis-server --appendonly yes  # Enable persistence
+
+networks:
+  dns-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local 
