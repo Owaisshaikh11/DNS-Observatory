@@ -1,81 +1,56 @@
 const { DEFAULT_TTL } = require("./types");
-const { redisHelpers } = require("../config/redis-config");
 const {
   normalizeDomainName,
   removeLocalRecord,
   setLocalRecord,
 } = require("./record-manager");
 
-const dynamicSubdomains = new Map(); // Map to store live dynamic subdomains
+// In-memory store for live dynamic subdomains (sub.domain → metadata)
+const dynamicSubdomains = new Map();
 
-// Load dynamic subdomains from Redis on startup
-async function loadDynamicSubdomains() {
-  try {
-    dynamicSubdomains.clear();
-    const records = await redisHelpers.getAllRecords();
-    for (const [domain, record] of Object.entries(records)) {
-      if (record.isDynamic) {
-        dynamicSubdomains.set(normalizeDomainName(domain), {
-          ipAddress: record.value,
-          expires: record.expires,
-          isPersistent: record.isPersistent
-        });
-      }
-    }
-    console.log('Loaded dynamic subdomains from Redis');
-  } catch (error) {
-    console.error('Error loading dynamic subdomains:', error);
-  }
+// No-op on startup — dynamic records are ephemeral and live only in memory
+function loadDynamicSubdomains() {
+  dynamicSubdomains.clear();
+  console.log("Dynamic subdomains initialized (in-memory only)");
 }
 
-// combines sub and domain to create into full domain name
-async function addDynamicSubdomain(sub, domain, ip, ttl = DEFAULT_TTL, isPersistent = false) {
+// Registers a new dynamic A record for sub.domain pointing to ip
+function addDynamicSubdomain(sub, domain, ip, ttl = DEFAULT_TTL, isPersistent = false) {
   const full = normalizeDomainName(`${sub}.${domain}`);
-  const ttlValue = Number(ttl);
-  const ttlSeconds = isPersistent || !Number.isInteger(ttlValue) || ttlValue <= 0
-    ? DEFAULT_TTL
-    : ttlValue;
+  const ttlSeconds =
+    isPersistent || !Number.isInteger(ttl) || ttl <= 0 ? DEFAULT_TTL : ttl;
   const expires = isPersistent ? null : Date.now() + ttlSeconds * 1000;
+
   const record = {
-    type: 'A',
+    type: "A",
     value: ip,
     ttl: isPersistent ? null : ttlSeconds,
-    expires: expires,
+    expires,
     isDynamic: true,
-    isPersistent: isPersistent
+    isPersistent,
   };
-  
-  // Store in memory
-  dynamicSubdomains.set(full, {
-    ipAddress: ip,
-    expires: expires,
-    isPersistent: isPersistent
-  });
 
-  // Store in Redis
-  await redisHelpers.setRecord(full, record, isPersistent ? 'persistent' : 'temp');
+  dynamicSubdomains.set(full, { ipAddress: ip, expires, isPersistent });
   setLocalRecord(full, record);
 
   return full;
 }
 
-async function removeDynamicSubdomain(sub, domain, type = 'all') {
+// Removes a dynamic subdomain from memory and the local record store
+function removeDynamicSubdomain(sub, domain) {
   const full = normalizeDomainName(`${sub}.${domain}`);
   const removed = dynamicSubdomains.delete(full);
   const removedLocal = removeLocalRecord(full);
-  const removedRedis = await redisHelpers.deleteRecord(full, type);
-  
-  return removed || removedLocal || removedRedis;
+  return removed || removedLocal;
 }
 
-async function cleanupExpiredSubdomains() {
+// Purges expired entries from the in-memory map
+function cleanupExpiredSubdomains() {
   const now = Date.now();
   for (const [key, val] of dynamicSubdomains.entries()) {
     if (!val.isPersistent && now > val.expires) {
       dynamicSubdomains.delete(key);
       removeLocalRecord(key);
-      // Remove from Redis
-      await redisHelpers.deleteRecord(key, 'temp');
     }
   }
 }

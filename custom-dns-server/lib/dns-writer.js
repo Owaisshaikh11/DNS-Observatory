@@ -5,7 +5,9 @@ const {
   TYPE_CNAME,
   TYPE_MX,
   TYPE_TXT,
+  TYPE_SOA,
 } = require("./types");
+
 
 // splits the domain name into labels and writes them to the buffer
 // eg([3]www[7]example[3]com[0]);
@@ -113,6 +115,20 @@ function writeAnswer(buffer, offset, name, answer) {
       buffer.writeUInt8(txtLen, dataOffset);
       buffer.write(answer.data.slice(0, txtLen), dataOffset + 1);
       length = 1 + txtLen;
+      break;
+    }
+    case TYPE_SOA: {
+      // MNAME (primary nameserver) + RNAME (admin email)
+      let soaOffset = dataOffset;
+      soaOffset = writeDomainName(buffer, soaOffset, answer.data.mname);
+      soaOffset = writeDomainName(buffer, soaOffset, answer.data.rname);
+      // Serial, Refresh, Retry, Expire, Minimum — each 4 bytes
+      buffer.writeUInt32BE(answer.data.serial,  soaOffset);      soaOffset += 4;
+      buffer.writeUInt32BE(answer.data.refresh, soaOffset);      soaOffset += 4;
+      buffer.writeUInt32BE(answer.data.retry,   soaOffset);      soaOffset += 4;
+      buffer.writeUInt32BE(answer.data.expire,  soaOffset);      soaOffset += 4;
+      buffer.writeUInt32BE(answer.data.minimum, soaOffset);      soaOffset += 4;
+      length = soaOffset - dataOffset;
       break;
     }
     default:

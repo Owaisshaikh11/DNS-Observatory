@@ -1,4 +1,5 @@
 const dgram = require("dgram");
+const { EventEmitter } = require("events");
 const { parseQuery, createResponse, createErrorResponse } = require("../lib/dns-parser");
 const { getRecordsForDomain, isLocalDomain } = require("../lib/dns-resolver");
 const { CLASS_IN } = require("../lib/types");
@@ -8,17 +9,24 @@ const { forwardQuery } = require("../lib/dns-forwarder");
 function startDnsUdpServer(port = 53) {
   const server = dgram.createSocket("udp4");
 
+  // Attach an event emitter so the telemetry bridge can subscribe
+  const dnsEvents = new EventEmitter();
+  server.dnsEvents = dnsEvents;
+
   server.on("error", (err) => {
     console.error(`DNS server error: ${err.message}`);
   });
 
   server.on("message", async (msg, rinfo) => {
+    const startTime = Date.now();
     let query;
+
     try {
       query = parseQuery(msg);
     } catch (err) {
-      console.error(`DNS Query parsing failed from ${rinfo.address}:${rinfo.port} - ${err.message}`);
-      // Extract Transaction ID if possible (first 2 bytes)
+      console.error(
+        `DNS Query parsing failed from ${rinfo.address}:${rinfo.port} - ${err.message}`
+      );
       const txId = msg.length >= 2 ? msg.readUInt16BE(0) : 0;
       const response = createErrorResponse(txId, 1); // RCODE 1 = FORMERR
       server.send(response, rinfo.port, rinfo.address, (sendErr) => {
@@ -33,7 +41,7 @@ function startDnsUdpServer(port = 53) {
         return;
       }
 
-      const question = query.questions[0]; // Extracting the first question.
+      const question = query.questions[0];
 
       console.log(
         `DNS Query: ${question.name} (Type ${question.type}) from ${rinfo.address}:${rinfo.port}`
@@ -47,23 +55,25 @@ function startDnsUdpServer(port = 53) {
         return;
       }
 
-      // Check if query should be forwarded to upstream DNS servers
+      // Forward non-local queries to upstream DNS servers
       if (dnsConfig.forwardEnabled && !isLocalDomain(question.name)) {
         console.log(`Forwarding query for ${question.name} to upstream servers`);
         const responseMsg = await forwardQuery(msg);
+
         if (responseMsg) {
           server.send(responseMsg, rinfo.port, rinfo.address, (sendErr) => {
             if (sendErr) console.error("Error sending forwarded DNS response:", sendErr);
           });
-          return;
+          _emitQuery(dnsEvents, question, rinfo, 0, startTime, false);
         } else {
           console.warn(`Upstream resolution failed for ${question.name}. Sending SERVFAIL.`);
           const response = createResponse(query, [], 2); // RCODE 2 = SERVFAIL
           server.send(response, rinfo.port, rinfo.address, (sendErr) => {
             if (sendErr) console.error("Error sending SERVFAIL response:", sendErr);
           });
-          return;
+          _emitQuery(dnsEvents, question, rinfo, 2, startTime, false);
         }
+        return;
       }
 
       // Local resolution
@@ -72,6 +82,8 @@ function startDnsUdpServer(port = 53) {
       server.send(response, rinfo.port, rinfo.address, (sendErr) => {
         if (sendErr) console.error("Error sending DNS response:", sendErr);
       });
+
+      _emitQuery(dnsEvents, question, rinfo, 0, startTime, true);
     } catch (err) {
       console.error("Error resolving DNS query:", err);
       try {
@@ -87,6 +99,19 @@ function startDnsUdpServer(port = 53) {
 
   server.bind(port, () => console.log(`DNS server running on port ${port}`));
   return server;
+}
+
+// Helper — builds and emits the telemetry event without cluttering the handler
+function _emitQuery(emitter, question, rinfo, rcode, startTime, isLocal) {
+  emitter.emit("query", {
+    domain: question.name,
+    type: question.type,
+    source: { address: rinfo.address, port: rinfo.port },
+    isLocal,
+    responseCode: rcode,
+    timestamp: Date.now(),
+    latencyMs: Date.now() - startTime,
+  });
 }
 
 module.exports = { startDnsUdpServer };

@@ -27,8 +27,8 @@ function startHttpApi(port) {
     res.json({ subdomains: result });
   });
 
-  app.post("/api/dns/subdomains", async (req, res) => {
-    const { subdomain, domain, ipAddress, ttl, isPersistent } = req.body;
+  app.post("/api/dns/subdomains", (req, res) => {
+    const { subdomain, domain, ipAddress, ttl, isPersistent } = req.body || {};
     const subdomainValue = typeof subdomain === "string" ? subdomain.trim() : "";
     const domainValue = typeof domain === "string" ? domain.trim() : "";
     const ipAddressValue = typeof ipAddress === "string" ? ipAddress.trim() : "";
@@ -48,26 +48,22 @@ function startHttpApi(port) {
     }
 
     try {
-      const domainName = await addDynamicSubdomain(
+      const domainName = addDynamicSubdomain(
         subdomainValue,
         domainValue,
         ipAddressValue,
         ttlSeconds,
         persistent
       );
-      res.json({
-        success: true,
-        domain: domainName,
-        isPersistent: persistent
-      });
+      res.json({ success: true, domain: domainName, isPersistent: persistent });
     } catch (error) {
-      console.error('Error adding subdomain:', error);
+      console.error("Error adding subdomain:", error);
       res.status(500).json({ error: "Failed to add subdomain" });
     }
   });
 
-  app.delete("/api/dns/subdomains", async (req, res) => {
-    const { subdomain, domain, type = 'all' } = req.body;
+  app.delete("/api/dns/subdomains", (req, res) => {
+    const { subdomain, domain } = req.body || {};
     const subdomainValue = typeof subdomain === "string" ? subdomain.trim() : "";
     const domainValue = typeof domain === "string" ? domain.trim() : "";
 
@@ -76,20 +72,19 @@ function startHttpApi(port) {
     }
 
     try {
-      const removed = await removeDynamicSubdomain(subdomainValue, domainValue, type);
+      const removed = removeDynamicSubdomain(subdomainValue, domainValue);
       res.status(removed ? 200 : 404).json({ success: removed });
     } catch (error) {
-      console.error('Error removing subdomain:', error);
+      console.error("Error removing subdomain:", error);
       res.status(500).json({ error: "Failed to remove subdomain" });
     }
   });
 
-  app.get("/api/dns/records", async (req, res) => {
+  app.get("/api/dns/records", (req, res) => {
     try {
-      const records = await getRecords();
-      res.json(records);
+      res.json(getRecords());
     } catch (error) {
-      console.error('Error retrieving records:', error);
+      console.error("Error retrieving records:", error);
       res.status(500).json({ error: "Failed to retrieve records" });
     }
   });

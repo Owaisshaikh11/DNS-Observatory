@@ -134,6 +134,7 @@ function createErrorResponse(id, rcode) {
 }
 
 module.exports = {
+  parseDomainName,
   parseQuery,
   createResponse,
   createErrorResponse,

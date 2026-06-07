@@ -1,7 +1,7 @@
 {
   "name": "custom-dns-server",
   "version": "1.0.0",
-  "description": "a custom dns server, with a intention to be used in my cloud ide project",
+  "description": "A custom DNS server with iterative resolution, dynamic records, and telemetry event hooks.",
   "main": "index.js",
   "directories": {
     "lib": "lib"
@@ -14,8 +14,7 @@
   "license": "MIT",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "ioredis": "^5.6.1"
+    "express": "^5.1.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
