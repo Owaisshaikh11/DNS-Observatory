@@ -1,13 +1,16 @@
 {
   "name": "dns-observatory",
   "version": "1.0.0",
-  "description": "",
+  "description": "A DNS resolution visualizer with iterative tracing and real-time telemetry.",
   "license": "ISC",
   "author": "Owais Shaikh",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev":          "concurrently --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"node app/server/index.js\" \"npm run dev --prefix app\"",
+    "start:server": "node app/server/index.js",
+    "start:app":    "npm run dev --prefix app",
+    "start:dns":    "node custom-dns-server/index.js"
   },
   "dependencies": {
     "concurrently": "^10.0.3"
