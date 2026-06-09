@@ -1,0 +1,23 @@
+meta {
+  name: Iterative DNS Trace - Invalid Record Type
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/dns/trace
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "domain": "google.com",
+    "type": "UNKNOWN"
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: contains Invalid type "UNKNOWN"
+}

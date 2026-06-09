@@ -1,0 +1,28 @@
+meta {
+  name: DNS Latency Benchmark
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/dns/benchmark
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "domain": "google.com",
+    "type": "A"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.domain: eq google.com
+  res.body.recordType: eq A
+  res.body.cloudflare: isDefined
+  res.body.google: isDefined
+  res.body.cloudflare.resolver: eq Cloudflare
+  res.body.google.resolver: eq Google
+}

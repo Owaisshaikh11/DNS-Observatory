@@ -100,7 +100,7 @@ function parseDnsResponse(buffer) {
   // ── Resource Record Sections ──────────────────────────────────────────────
   const { records: answers,    nextOffset: o1 } = parseSection(buffer, offset,  ancount);
   const { records: authority,  nextOffset: o2 } = parseSection(buffer, o1,      nscount);
-  const { records: additional, nextOffset: o3 } = parseSection(buffer, o2,      arcount);
+  const { records: additional }                 = parseSection(buffer, o2,      arcount);
 
   // ── DNSSEC Presence Detection ─────────────────────────────────────────────
   // We don't validate signatures — we just check whether RRSIG/DNSKEY/DS

@@ -6,3 +6,4 @@ planning-docs/
 .agents/
 .env
 AGENTS.md
+skills-lock.json

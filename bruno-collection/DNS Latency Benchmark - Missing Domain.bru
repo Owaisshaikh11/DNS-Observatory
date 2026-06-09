@@ -1,0 +1,22 @@
+meta {
+  name: DNS Latency Benchmark - Missing Domain
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/dns/benchmark
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "domain": ""
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: eq domain is required
+}

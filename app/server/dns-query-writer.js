@@ -31,7 +31,7 @@ function buildDnsQuery(domain, type, opts = {}) {
   } = opts;
 
   const buf = Buffer.alloc(512);
-  let offset = 0;
+  let offset = 12;
 
   // ── DNS Header (12 bytes) ─────────────────────────────────────────────────
   buf.writeUInt16BE(txId, 0);
@@ -40,7 +40,6 @@ function buildDnsQuery(domain, type, opts = {}) {
   buf.writeUInt16BE(0, 6);               // ANCOUNT: 0 answers
   buf.writeUInt16BE(0, 8);               // NSCOUNT: 0 authority
   buf.writeUInt16BE(dnssecOk ? 1 : 0, 10); // ARCOUNT: 1 if adding OPT record
-  offset = 12;
 
   // ── Question Section ──────────────────────────────────────────────────────
   offset = writeDomainName(buf, offset, domain);

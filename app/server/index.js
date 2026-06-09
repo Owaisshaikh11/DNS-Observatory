@@ -84,7 +84,7 @@ async function start() {
 
     // Sanitise: lowercase, remove trailing dot, reject obviously bad input
     const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-    if (!/^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$/.test(cleanDomain)) {
+    if (!/^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$/.test(cleanDomain)) {
       return res.status(400).json({ error: `"${domain}" is not a valid domain name` });
     }
 

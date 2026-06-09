@@ -68,7 +68,7 @@ function sendUdpQuery(ip, port, queryBuffer, timeoutMs = 3000) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { socket.close(); } catch (_) { /* already closed */ }
+      try { socket.close(); } catch { /* already closed */ }
       err ? reject(err) : resolve(result);
     };
 
@@ -237,14 +237,11 @@ async function iterativeTrace(domain, recordType = 'A') {
   }));
 
   // ─── Hop 1: LOCAL DNS ─────────────────────────────────────────────────────
-  let localParsed = null;
-
   try {
     const { parsed, latencyMs } = await performHop('127.0.0.1', 5354, domain, typeNum, {
       recursionDesired: true,  // ask the local server to resolve if it knows the answer
       dnssecOk: false,
     });
-    localParsed = parsed;
     cumulative += latencyMs;
 
     const isLocalHit = parsed.isAuthoritative && parsed.answers.length > 0;
@@ -293,7 +290,7 @@ async function iterativeTrace(domain, recordType = 'A') {
       rootServer.ipv4, 53, domain, typeNum, { dnssecOk: true }
     ));
   } catch (err) {
-    throw new Error(`Root server ${rootServer.name} (${rootServer.ipv4}) timed out: ${err.message}`);
+    throw new Error(`Root server ${rootServer.name} (${rootServer.ipv4}) timed out: ${err.message}`, { cause: err });
   }
 
   cumulative += rootLatency;
@@ -350,7 +347,7 @@ async function iterativeTrace(domain, recordType = 'A') {
       tldRef.ip, 53, domain, typeNum, { dnssecOk: true }
     ));
   } catch (err) {
-    throw new Error(`TLD server ${tldRef.nsName} (${tldRef.ip}) timed out: ${err.message}`);
+    throw new Error(`TLD server ${tldRef.nsName} (${tldRef.ip}) timed out: ${err.message}`, { cause: err });
   }
 
   cumulative += tldLatency;
@@ -406,7 +403,7 @@ async function iterativeTrace(domain, recordType = 'A') {
       authRef.ip, 53, domain, typeNum, { dnssecOk: true }
     ));
   } catch (err) {
-    throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) timed out: ${err.message}`);
+    throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) timed out: ${err.message}`, { cause: err });
   }
 
   cumulative += authLatency;
