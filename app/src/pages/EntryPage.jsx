@@ -1,125 +1,348 @@
-import { useState } from 'react';
-import InteractiveGrid from '../components/InteractiveGrid';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router';
+import { motion } from 'framer-motion';
+import { useTraceStore } from '../stores/useTraceStore';
+import { useTelemetryStore } from '../stores/useTelemetryStore';
 import BrutalistSelect from '../components/BrutalistSelect';
 import BentoBox from '../components/BentoBox';
-import FlagBadge from '../components/FlagBadge';
-import { Terminal, Activity, Layers, ShieldCheck } from 'lucide-react';
+
+const placeholderDomains = ['GOOGLE.COM', 'EXAMPLE.COM', 'GITHUB.COM', 'WIKIPEDIA.ORG'];
 
 export default function EntryPage() {
-  const [selectedRecord, setSelectedRecord] = useState('A');
-  const [selectedResolver, setSelectedResolver] = useState('local');
+  const navigate = useNavigate();
 
-  const recordOptions = [
-    { value: 'A', label: 'A (IPv4 Address)' },
-    { value: 'AAAA', label: 'AAAA (IPv6 Address)' },
-    { value: 'CNAME', label: 'CNAME (Canonical Name)' },
-    { value: 'MX', label: 'MX (Mail Exchange)' },
-    { value: 'TXT', label: 'TXT (Text Record)' },
-    { value: 'NS', label: 'NS (Name Server)' },
-    { value: 'SOA', label: 'SOA (Start of Authority)' },
-    { value: 'ALL', label: 'ALL Records (Iterative)' }
-  ];
+  // telemetry connection 
+  // const { connect } = useTelemetryStore();
 
-  const resolverOptions = [
-    { value: 'local', label: 'Observatory Local (UDP 5354)' },
-    { value: 'root', label: 'Direct Iterative Resolution' }
-  ];
+  // useEffect(() => {
+  //   connect();
+  // }, [connect]);
+
+  const {
+    startTrace,
+    setDomain,
+    setRecordType,
+    setIsBenchmarkMode,
+  } = useTraceStore();
+
+  const [domainInput, setDomainInput] = useState('');
+  const [selectedRecord, setSelectedRecord] = useState('ALL');
+  const [selectedResolver, setSelectedResolver] = useState('1.1.1.1 (Cloudflare)');
+  const [isBenchmarkModeChecked, setIsBenchmarkModeChecked] = useState(false);
+  const [inputError, setInputError] = useState(false);
+
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef(null);
+
+  const [scrollY, setScrollY] = useState(0);
+  const handleScroll = (e) => setScrollY(e.currentTarget.scrollTop);
+
+  const getDynamicFontSize = (len) => {
+    if (len > 30) return 'text-[3.5vw] md:text-[2.5vw]';
+    if (len > 20) return 'text-[5vw] md:text-[3.5vw]';
+    return 'text-[7vw] md:text-[5vw]';
+  };
+
+  const [currentPlaceholder, setCurrentPlaceholder] = useState('');
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    if (domainInput) {
+      return;
+    }
+
+    let timer;
+    const fullText = placeholderDomains[placeholderIndex];
+
+    const handleTyping = () => {
+      if (!isDeleting) {
+        setCurrentPlaceholder((prev) => fullText.slice(0, prev.length + 1));
+        if (currentPlaceholder === fullText) {
+          timer = setTimeout(() => setIsDeleting(true), 2000);
+        } else {
+          timer = setTimeout(handleTyping, 120);
+        }
+      } else {
+        setCurrentPlaceholder((prev) => fullText.slice(0, prev.length - 1));
+        if (currentPlaceholder === '') {
+          setIsDeleting(false);
+          setPlaceholderIndex((prev) => (prev + 1) % placeholderDomains.length);
+          timer = setTimeout(handleTyping, 400);
+        } else {
+          timer = setTimeout(handleTyping, 60);
+        }
+      }
+    };
+
+    timer = setTimeout(handleTyping, isDeleting ? 60 : 120);
+    return () => clearTimeout(timer);
+  }, [currentPlaceholder, isDeleting, placeholderIndex, domainInput]);
+
+  const handleTraceSubmit = (e) => {
+    e.preventDefault();
+    const cleanDomain = domainInput.trim().toLowerCase().replace(/\.$/, '');
+    const isValid = /^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$/.test(cleanDomain) && cleanDomain.includes('.') && cleanDomain.length > 3;
+
+    if (isValid) {
+      setDomain(cleanDomain);
+      setRecordType(selectedRecord);
+      setIsBenchmarkMode(isBenchmarkModeChecked);
+      startTrace(cleanDomain, selectedRecord);
+      navigate('/trace');
+    } else {
+      setInputError(true);
+      setTimeout(() => setInputError(false), 400);
+    }
+  };
 
   return (
-    <InteractiveGrid>
-      <div className="min-h-screen flex flex-col justify-between p-6 md:p-12 font-sans select-none">
-        {/* Header HUD */}
-        <header className="flex justify-between items-center border-b-2 border-[#0D0D0D] pb-4 font-mono">
-          <div className="flex items-center gap-3">
-            <span className="w-3.5 h-3.5 bg-[#FF4D00] animate-pulse rounded-none" />
-            <h1 className="text-xl font-bold tracking-tight uppercase">DNS_OBSERVATORY v1.0.0</h1>
-          </div>
-          <div className="hidden md:flex gap-6 text-[10px] uppercase font-bold tracking-wider">
-            <span>Status: <span className="text-[#22C55E]">ONLINE</span></span>
-            <span>DNS Server: <span className="text-[#FF4D00]">PORT 5354</span></span>
-            <span>API: <span className="text-[#FF4D00]">PORT 4000</span></span>
-          </div>
-        </header>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, y: -40 }}
+      transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+      onScroll={handleScroll}
+      className="relative w-full h-full overflow-y-auto overflow-x-hidden flex flex-col text-ink"
+    >
+      {/* Branding Header with Reactive Glassmorphism */}
+      <header className="brutalist-navbar">
+        <div className="flex flex-col">
+          <h1 className="font-display font-black text-xl md:text-2xl uppercase tracking-tighter leading-none">DNS Observatory</h1>
+          <span className="font-mono text-[9px] text-accent mt-1 tracking-widest">Resolution Lab</span>
+        </div>
 
-        {/* Main Interface Test Box */}
-        <main className="my-12 max-w-4xl mx-auto w-full">
-          <div className="bg-white border-2 border-[#0D0D0D] p-8 md:p-12 shadow-[8px_8px_0_0_#0D0D0D] relative mb-12">
-            <div className="absolute top-0 right-0 bg-[#FF4D00] text-white px-3 py-1 font-mono text-[10px] font-bold uppercase border-b-2 border-l-2 border-[#0D0D0D]">
-              COMPONENT_SHOWCASE
-            </div>
+        <div className="flex items-center gap-8 ">
+          <a
+            href="https://github.com/Owaisshaikh11"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ padding: '12px 24px' }}
+            className="flex items-center gap-2 border border-ink font-mono text-[10px] uppercase bg-base hover:bg-ink hover:text-[var(--base)] hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-200 interactive-hover"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" >
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+            </svg>
+            <span className="hidden sm:inline font-bold">GITHUB</span>
+          </a>
+        </div>
+      </header>
 
-            <h2 className="font-display text-3xl md:text-5xl font-extrabold uppercase mb-4 tracking-tight leading-none">
-              UI FOUNDATION VERIFICATION
-            </h2>
-            <p className="font-mono text-sm opacity-70 mb-8 max-w-2xl">
-              Testing Brutalist design system tokens, CSS variables, Interactive grid layout, Custom cursor transitions, and React state stores.
-            </p>
-
-            {/* Test Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <BrutalistSelect
-                label="SELECT RECORD TYPE"
-                options={recordOptions}
-                value={selectedRecord}
-                onChange={setSelectedRecord}
-              />
-              <BrutalistSelect
-                label="SELECT RESOLVER METHOD"
-                options={resolverOptions}
-                value={selectedResolver}
-                onChange={setSelectedResolver}
-              />
-            </div>
-
-            {/* Flags Testing */}
-            <div className="border-t-2 border-[#0D0D0D]/10 pt-6">
-              <div className="text-[10px] text-[#0D0D0D] opacity-50 uppercase tracking-widest mb-3 font-mono">
-                HOVER TO TEST FLAGS TOOLTIPS (FLAGBADGE)
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <FlagBadge flag="QR" />
-                <FlagBadge flag="AA" />
-                <FlagBadge flag="RD" />
-                <FlagBadge flag="RA" />
-                <FlagBadge flag="TC" />
-              </div>
-            </div>
-          </div>
-
-          {/* Bento Grid Info Box */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <BentoBox
-              title="Iterative Tracer"
-              description="Hop-by-hop resolution tracking from root servers down to the authoritative nameserver with real-time geographical lookup."
-              icon={<Layers className="w-8 h-8" />}
-              delay={0.1}
-            />
-            <BentoBox
-              title="Live Telemetry"
-              description="Monitor incoming queries processed by the local DNS daemon. Streamed instantaneously via Socket.io websocket events."
-              icon={<Activity className="w-8 h-8" />}
-              delay={0.2}
-            />
-            <BentoBox
-              title="DNSSEC Verification"
-              description="Detailed auditing of cryptographic markers including RRSIG validation, DS record presence, and DNSKEY trust chains."
-              icon={<ShieldCheck className="w-8 h-8" />}
-              delay={0.3}
-            />
-          </div>
-        </main>
-
-        {/* Footer HUD */}
-        <footer className="flex flex-col md:flex-row justify-between items-center border-t-2 border-[#0D0D0D] pt-4 font-mono text-[10px] tracking-wide uppercase">
-          <div className="flex items-center gap-2 mb-2 md:mb-0">
-            <Terminal className="w-3.5 h-3.5" />
-            <span>DESIGN SYSTEM: FUNCTIONAL BRUTALIST</span>
-          </div>
-          <div className="opacity-60">
-            SECURE DNS OBSERVATORY LABORATORY // ALL HOPS MAPPED
-          </div>
-        </footer>
+      {/* Left HUD Elements */}
+      <div className="absolute top-44 left-12 font-mono text-[9px] hidden lg:flex flex-col gap-3 opacity-60 z-20 pointer-events-none">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 bg-green-500 animate-pulse"></div>
+          DNS SERVICES ONLINE
+        </div>
+        <div className="border-l border-ink/30 pl-3 ml-0.5 flex flex-col gap-1">
+          <span>LOCAL RESOLVER: 127.0.0.1:5354</span>
+          <span>API ENDPOINT: 127.0.0.1:4000</span>
+          <span>TELEMETRY: SOCKET.IO READY</span>
+        </div>
+        <div className="mt-4 border-l border-accent/50 pl-3 ml-0.5 text-accent opacity-80 leading-relaxed">
+          HINT: Try tracing <strong className="font-bold">"example.com"</strong> for a local resolution,<br />
+          or <strong className="font-bold">"github.com"</strong> for a live iterative resolution.
+        </div>
       </div>
-    </InteractiveGrid>
+
+      {/* Fold 1: Hero Trace Input */}
+      <div className="relative z-20 w-full min-h-screen flex flex-col items-center justify-center px-6 pt-20">
+        <div className="w-full max-w-4xl flex flex-col items-center">
+          <form onSubmit={handleTraceSubmit} className="w-full flex flex-col items-center gap-12">
+
+            <div className="w-full relative py-4 flex flex-col items-center gap-4 group cursor-text" onClick={() => inputRef.current?.focus()}>
+              {/* Hidden input to capture keyboard events */}
+              <input
+                ref={inputRef}
+                autoFocus
+                type="text"
+                value={domainInput}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                onChange={(e) => setDomainInput(e.target.value.toLowerCase())}
+                placeholder=""
+                className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-text caret-transparent"
+              />
+
+              {/* Styled text display */}
+              <motion.div
+                animate={inputError ? { x: [-12, 12, -10, 10, -5, 5, 0] } : {}}
+                transition={{ duration: 0.4 }}
+                className={`w-full text-center font-mono font-bold tracking-tight select-none h-[1.2em] flex items-center justify-center ${getDynamicFontSize(domainInput.length)}`}
+              >
+                {domainInput ? (
+                  <span className="text-ink">
+                    {domainInput.toUpperCase()}
+                    {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                  </span>
+                ) : (
+                  <span className="text-ink/10 uppercase">
+                    {currentPlaceholder}
+                    {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                  </span>
+                )}
+              </motion.div>
+              <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[1.5px] transition-all duration-300 ${isFocused
+                ? 'bg-accent w-full max-w-xl'
+                : 'bg-gradient-to-r from-transparent via-ink/30 group-hover:via-accent to-transparent w-3/4 max-w-lg'
+                }`}></div>
+            </div>
+
+            {/* Removed Validation Badges */}
+
+            {/* Custom Dropdown Configuration Panel */}
+            <div className="flex flex-col md:flex-row items-center gap-6 md:gap-8 w-full justify-center">
+              <BrutalistSelect
+                label="Record Type"
+                value={selectedRecord}
+                options={['ALL', 'A', 'AAAA', 'MX', 'TXT', 'CNAME']}
+                onChange={setSelectedRecord}
+                width="w-full md:w-[220px]"
+              />
+              <BrutalistSelect
+                label="Recursive Resolver"
+                value={selectedResolver}
+                options={['1.1.1.1 (Cloudflare)', '8.8.8.8 (Google)', 'System Default']}
+                onChange={setSelectedResolver}
+                width="w-full md:w-[260px]"
+              />
+            </div>
+
+            <label className="flex items-center gap-3 font-mono text-[10px] uppercase cursor-pointer interactive-hover opacity-70 hover:opacity-100 transition-opacity select-none">
+              <div className="brutalist-checkbox-box">
+                <div className={`w-2 h-2 bg-accent transition-transform duration-200 origin-center ${isBenchmarkModeChecked ? 'scale-100' : 'scale-0'}`}></div>
+              </div>
+              Compare Resolvers Benchmark
+              <input
+                type="checkbox"
+                className="hidden"
+                checked={isBenchmarkModeChecked}
+                onChange={(e) => setIsBenchmarkModeChecked(e.target.checked)}
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="mt-2 flex items-center gap-4 brutalist-button group interactive-hover cursor-pointer"
+            >
+              <span>Initiate Trace</span>
+              <span className="transition-transform duration-200 group-hover:translate-x-1">→</span>
+            </button>
+          </form>
+        </div>
+
+        {/* Scroll Indicator */}
+        <div
+          style={{ opacity: Math.max(0, 0.4 - scrollY / 200) }}
+          className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-4 transition-opacity duration-300 pointer-events-none"
+        >
+          <span className="font-mono text-[9px] uppercase tracking-[0.2em]">Scroll to Inspect</span>
+          <div className="w-[1px] h-12 bg-ink origin-top animate-scale-y"></div>
+        </div>
+      </div>
+
+      {/* Fold 2: Bento Box Details */}
+      <div className="w-full flex justify-center relative z-20">
+        <div className="w-full max-w-6xl px-6 py-32 mb-24 flex flex-col justify-center">
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.6 }}
+            className="brutalist-architecture-header"
+          >
+            <h2 className="font-display font-black text-3xl md:text-5xl uppercase tracking-tighter">System<br />Architecture</h2>
+            <p className="font-sans text-sm opacity-60 mt-6 max-w-md leading-relaxed">
+              The Observatory dissects standard resolution chains into granular data points, presented through a reactive spatial telemetry interface designed for precision network analysis.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 auto-rows-[260px] gap-4">
+            <BentoBox
+              delay={0.1}
+              className="md:col-span-2 md:row-span-2"
+              title="Spatial Resolution Graph"
+              text="A fully interactive WebGL topographical map charting the exact journey from the local stub resolver out to the authoritative nameserver, visualizing each delegation hop dynamically. Watch TTL stability affect the nodes in real-time."
+              icon="[ GRAPH SYSTEM ]"
+              decoration={
+                <svg width="400" height="400" viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="0.5" className="font-mono text-[4px] opacity-15">
+                  <circle cx="50" cy="50" r="40" />
+                  <circle cx="50" cy="50" r="30" />
+                  <circle cx="50" cy="50" r="20" strokeDasharray="2 2" />
+                  <path d="M50 10 L50 90 M10 50 L90 50" />
+                  <text x="52" y="15" fill="currentColor">ROOT (.)</text>
+                  <text x="52" y="35" fill="currentColor">TLD (.COM)</text>
+                  <text x="52" y="55" fill="currentColor">AUTH (NS)</text>
+                  <text x="12" y="55" fill="currentColor">LOCAL</text>
+                </svg>
+              }
+            />
+            <BentoBox
+              delay={0.2}
+              title="Multi-Record Batching"
+              text="Select 'ALL' to natively dispatch and resolve simultaneous queries for A, AAAA, MX, and TXT structures across the target domain infrastructure."
+              icon="[ QUERY ENGINE ]"
+              decoration={
+                <div className="flex flex-col gap-1 w-48 font-mono text-[9px] opacity-40 text-left p-2 border border-ink/10 bg-base/50">
+                  <div className="border-b border-ink/10 pb-1 mb-1 text-accent font-bold">// PARALLEL BATCH</div>
+                  <div>A: 192.30.255.113</div>
+                  <div>AAAA: 2606:50c0:8000::154</div>
+                  <div>MX: 10 mail.example.com</div>
+                  <div>TXT: v=spf1 include:_spf.example.com ~all</div>
+                </div>
+              }
+            />
+            <BentoBox
+              delay={0.3}
+              title="Packet Inspector"
+              text="Deep UDP/TCP raw packet decoding. Inspect opcodes, flags, and DNS headers natively within the trace interface."
+              icon="[ TELEMETRY ]"
+              decoration={
+                <div className="flex flex-col gap-1 w-48 font-mono text-[9px] opacity-40 text-left p-2 border border-ink/10 bg-base/50">
+                  <div className="border-b border-ink/10 pb-1 mb-1 text-accent font-bold">// DNS HEADER</div>
+                  <div>Transaction ID: 0x4815</div>
+                  <div>Flags: 0x8180 (Response)</div>
+                  <div>Questions: 1 | Answers: 2</div>
+                  <div>Authority RRs: 2 | Additional: 2</div>
+                </div>
+              }
+            />
+            <BentoBox
+              delay={0.4}
+              className="md:col-span-3 h-[180px]"
+              title="DNSSEC Validation Layer & Cache Diagnostics"
+              text="Ensure cryptographic integrity by mapping the strict chain of trust down from the root zone, while identifying cold lookups vs warm cache hits with precise latency tracking."
+              icon="[ SECURITY & PERFORMANCE ]"
+              decoration={
+                <div className="flex flex-col gap-1 w-64 font-mono text-[9px] opacity-40 text-left p-2 border border-ink/10 bg-base/50">
+                  <div className="border-b border-ink/10 pb-1 mb-1 text-accent font-bold">// DNSSEC CHAIN OF TRUST</div>
+                  <div>. (Root) &rarr; DS [Key Tag: 20326] &rarr; VERIFIED</div>
+                  <div>.com (TLD) &rarr; DNSKEY [Alg: RSASHA256] &rarr; VERIFIED</div>
+                  <div>example.com (Auth) &rarr; RRSIG [A Record Signature] &rarr; VERIFIED</div>
+                </div>
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Brutalist Footer */}
+      <footer className="brutalist-footer-custom">
+        <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start gap-12">
+          <div className="flex flex-col">
+            <span className="font-display font-black uppercase text-2xl tracking-tighter">DNS Observatory</span>
+            <span className="font-mono text-[10px] opacity-50 mt-2">© 2026 / OPEN SYSTEMS INTERFACE</span>
+            <a
+              href="https://github.com/owaisshaikh"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-[10px] uppercase font-bold text-accent mt-6 hover:text-ink hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-200 interactive-hover block border border-accent hover:border-ink px-6 py-3 w-max sharp-border"
+            >
+              CREATED BY OWAIS SHAIKH
+            </a>
+          </div>
+        </div>
+      </footer>
+    </motion.div>
   );
 }

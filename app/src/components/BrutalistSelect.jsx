@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-export default function BrutalistSelect({ options, value, onChange, label }) {
+export default function BrutalistSelect({ options, value, onChange, label, width = "w-[200px]" }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -15,32 +15,40 @@ export default function BrutalistSelect({ options, value, onChange, label }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Normalize options to support both string array and object array
+  const normalizedOptions = options.map(opt => 
+    typeof opt === 'string' ? { value: opt, label: opt } : opt
+  );
+
+  const selectedLabel = normalizedOptions.find(o => o.value === value)?.label || value;
+
   return (
-    <div className="relative font-mono" ref={containerRef}>
-      {label && <div className="text-[10px] text-[#0D0D0D] opacity-50 uppercase tracking-widest mb-2">{label}</div>}
+    <div className={`relative ${width} z-30 font-mono interactive-hover`} ref={containerRef}>
+      {label && <label className="font-mono text-[9px] uppercase opacity-50 block mb-2">{label}</label>}
       
       <button 
         type="button"
-        className="interactive w-full flex items-center justify-between bg-white border-2 border-[#0D0D0D] px-4 py-3 text-sm font-bold shadow-[4px_4px_0_0_#0D0D0D] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#0D0D0D] transition-all"
+        className="w-full brutalist-select-trigger uppercase flex justify-between items-center outline-none cursor-pointer"
         onClick={() => setIsOpen(!isOpen)}
       >
-        <span>{options.find(o => o.value === value)?.label || 'Select...'}</span>
-        <span className="text-[10px] opacity-50">{isOpen ? '▲' : '▼'}</span>
+        <span className="truncate">{selectedLabel}</span>
+        <span className={`text-[8px] transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -5 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            exit={{ opacity: 0, y: -5 }}
             transition={{ duration: 0.15 }}
-            className="absolute z-50 top-full left-0 right-0 mt-2 bg-white border-2 border-[#0D0D0D] shadow-[4px_4px_0_0_#0D0D0D]"
+            className="absolute top-[calc(100%+4px)] left-0 w-full brutalist-select-dropdown flex flex-col max-h-[200px] overflow-y-auto z-50"
           >
-            {options.map((option) => (
+            {normalizedOptions.map((option) => (
               <button
+                type="button"
                 key={option.value}
-                className="interactive w-full text-left px-4 py-2.5 text-sm font-bold hover:bg-[#FF4D00] hover:text-white border-b last:border-b-0 border-[#0D0D0D]/10 transition-colors"
+                className="brutalist-select-option text-left cursor-pointer outline-none"
                 onClick={() => {
                   onChange(option.value);
                   setIsOpen(false);
@@ -52,6 +60,8 @@ export default function BrutalistSelect({ options, value, onChange, label }) {
           </motion.div>
         )}
       </AnimatePresence>
+
     </div>
   );
+
 }
