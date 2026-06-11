@@ -2,11 +2,57 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion } from 'framer-motion';
 import { useTraceStore } from '../stores/useTraceStore';
-import { useTelemetryStore } from '../stores/useTelemetryStore';
 import BrutalistSelect from '../components/BrutalistSelect';
 import BentoBox from '../components/BentoBox';
 
 const placeholderDomains = ['GOOGLE.COM', 'EXAMPLE.COM', 'GITHUB.COM', 'WIKIPEDIA.ORG'];
+
+const getValidationErrors = (val) => {
+  const errors = [];
+  if (!val) return errors;
+
+  if (/\s/.test(val)) {
+    errors.push("Spaces are not allowed");
+  }
+
+  if (!/^[a-z0-9\-.]*$/i.test(val)) {
+    errors.push("Only alphanumeric characters, '-' and '.' are allowed");
+  }
+
+  const parts = val.split('.');
+  if (parts.length < 2) {
+    errors.push("Must include a dot followed by an extension (e.g. .com)");
+  } else {
+    const tld = parts[parts.length - 1];
+    if (tld.length < 2) {
+      errors.push("Domain extension (TLD) must be at least 2 characters long");
+    }
+    if (!/^[a-z0-9]*$/i.test(tld)) {
+      errors.push("Domain extension must be alphanumeric");
+    }
+  }
+
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i];
+    if (segment.startsWith('-') || segment.endsWith('-')) {
+      errors.push("Segments cannot start or end with a hyphen");
+      break;
+    }
+    if (segment.length > 63) {
+      errors.push("Domain segment cannot exceed 63 characters");
+    }
+    if (i < parts.length - 1 && segment === '') {
+      errors.push("Consecutive dots or empty labels are not allowed");
+      break;
+    }
+  }
+
+  if (val.length > 253) {
+    errors.push("Total domain name length cannot exceed 253 characters");
+  }
+
+  return errors;
+};
 
 export default function EntryPage() {
   const navigate = useNavigate();
@@ -30,6 +76,10 @@ export default function EntryPage() {
   const [selectedResolver, setSelectedResolver] = useState('1.1.1.1 (Cloudflare)');
   const [isBenchmarkModeChecked, setIsBenchmarkModeChecked] = useState(false);
   const [inputError, setInputError] = useState(false);
+  const [pasteError, setPasteError] = useState(null);
+
+  const cleanDomain = domainInput.trim().toLowerCase();
+  const validationErrors = getValidationErrors(cleanDomain);
 
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef(null);
@@ -81,21 +131,83 @@ export default function EntryPage() {
 
   const handleTraceSubmit = (e) => {
     e.preventDefault();
-    const cleanDomain = domainInput.trim().toLowerCase().replace(/\.$/, '');
-    const isValid = /^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$/.test(cleanDomain) && cleanDomain.includes('.') && cleanDomain.length > 3;
+    const cleanSubmitDomain = domainInput.trim().toLowerCase().replace(/\.$/, '');
+    const errors = getValidationErrors(cleanSubmitDomain);
+    const isValid = cleanSubmitDomain.length > 0 && errors.length === 0;
 
     if (isValid) {
-      setDomain(cleanDomain);
+      setDomain(cleanSubmitDomain);
       setRecordType(selectedRecord);
       setIsBenchmarkMode(isBenchmarkModeChecked);
-      startTrace(cleanDomain, selectedRecord);
+      startTrace(cleanSubmitDomain, selectedRecord);
       navigate('/trace');
     } else {
       setInputError(true);
       setTimeout(() => setInputError(false), 400);
     }
   };
+  const handleNativePaste = (e) => {
+    const pastedText = e.clipboardData.getData('text');
+    if (pastedText) {
+      e.preventDefault();
+      let text = pastedText.trim();
+      try {
+        if (!/^https?:\/\//i.test(text) && text.includes('.')) {
+          text = 'http://' + text;
+        }
+        const url = new URL(text);
+        text = url.hostname;
+      } catch {
+        text = text.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0].split('?')[0];
+      }
+      text = text.replace(/\.$/, '').toLowerCase();
 
+      const errors = getValidationErrors(text);
+      if (errors.length > 0 || text.length === 0) {
+        setInputError(true);
+        setTimeout(() => setInputError(false), 400);
+        setPasteError(errors[0] || "Invalid domain name pasted");
+        setTimeout(() => setPasteError(null), 3000);
+      } else {
+        setPasteError(null);
+        setDomainInput(text);
+      }
+    }
+  };
+  const handleMobilePaste = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      let text = await navigator.clipboard.readText();
+      if (text) {
+        text = text.trim();
+        try {
+          if (!/^https?:\/\//i.test(text) && text.includes('.')) {
+            text = 'http://' + text;
+          }
+          const url = new URL(text);
+          text = url.hostname;
+        } catch {
+          text = text.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0].split('?')[0];
+        }
+        text = text.replace(/\.$/, '').toLowerCase();
+
+        const errors = getValidationErrors(text);
+        if (errors.length > 0 || text.length === 0) {
+          setInputError(true);
+          setTimeout(() => setInputError(false), 400);
+          setPasteError(errors[0] || "Invalid domain name pasted");
+          setTimeout(() => setPasteError(null), 3000);
+        } else {
+          setPasteError(null);
+          setDomainInput(text);
+        }
+      }
+    } catch (err) {
+      console.error("Mobile clipboard read failed:", err);
+      inputRef.current?.focus();
+    }
+  };
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -150,45 +262,105 @@ export default function EntryPage() {
         <div className="w-full max-w-4xl flex flex-col items-center">
           <form onSubmit={handleTraceSubmit} className="w-full flex flex-col items-center gap-12">
 
-            <div className="w-full relative py-4 flex flex-col items-center gap-4 group cursor-text" onClick={() => inputRef.current?.focus()}>
-              {/* Hidden input to capture keyboard events */}
-              <input
-                ref={inputRef}
-                autoFocus
-                type="text"
-                value={domainInput}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
-                onChange={(e) => setDomainInput(e.target.value.toLowerCase())}
-                placeholder=""
-                className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-text caret-transparent"
-              />
+            <div className="w-full py-4 flex flex-col items-center group cursor-text" onClick={() => inputRef.current?.focus()}>
+              <div className="w-full max-w-xl relative py-2 flex flex-col items-center">
+                {/* Hidden input to capture keyboard events */}
+                <input
+                  ref={inputRef}
+                  autoFocus
+                  type="text"
+                  value={domainInput}
+                  onFocus={() => setIsFocused(true)}
+                  onBlur={() => setIsFocused(false)}
+                  onChange={(e) => {
+                    setDomainInput(e.target.value.toLowerCase());
+                    if (pasteError) setPasteError(null);
+                  }}
+                  onPaste={handleNativePaste}
+                  placeholder=""
+                  className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-text caret-transparent"
+                />
 
-              {/* Styled text display */}
+                {/* Styled text display */}
+                <motion.div
+                  animate={inputError ? { x: [-12, 12, -10, 10, -5, 5, 0] } : {}}
+                  transition={{ duration: 0.4 }}
+                  className={`w-full text-center font-mono font-bold tracking-tight select-none h-[1.2em] flex items-center justify-center ${getDynamicFontSize(domainInput.length)}`}
+                >
+                  {domainInput ? (
+                    <span className="text-ink">
+                      {domainInput.toUpperCase()}
+                      {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                    </span>
+                  ) : (
+                    <span className="text-ink/10 uppercase">
+                      {currentPlaceholder}
+                      {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                    </span>
+                  )}
+                </motion.div>
+                
+                <div className={`absolute bottom-0 left-0 w-full h-[1.5px] transition-all duration-300 ${
+                  domainInput.trim()
+                    ? (validationErrors.length === 0 ? 'bg-green-600' : 'bg-accent')
+                    : (isFocused
+                        ? 'bg-accent'
+                        : 'bg-gradient-to-r from-transparent via-ink/30 group-hover:via-accent to-transparent')
+                }`}></div>
+              </div>
+            </div>
+
+            {pasteError ? (
               <motion.div
-                animate={inputError ? { x: [-12, 12, -10, 10, -5, 5, 0] } : {}}
-                transition={{ duration: 0.4 }}
-                className={`w-full text-center font-mono font-bold tracking-tight select-none h-[1.2em] flex items-center justify-center ${getDynamicFontSize(domainInput.length)}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none h-4 text-accent flex items-center gap-1.5 justify-center"
               >
-                {domainInput ? (
-                  <span className="text-ink">
-                    {domainInput.toUpperCase()}
-                    {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                <span>[-]</span>
+                <span>PASTE REJECTED: {pasteError}</span>
+              </motion.div>
+            ) : domainInput.trim() ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.15 }}
+                className="font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none h-4"
+              >
+                {validationErrors.length > 0 ? (
+                  <span className="text-accent flex items-center gap-1.5 justify-center">
+                    <span>[-]</span>
+                    <span>{validationErrors[0]}</span>
                   </span>
                 ) : (
-                  <span className="text-ink/10 uppercase">
-                    {currentPlaceholder}
-                    {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                  <span className="text-green-600 flex items-center gap-1.5 justify-center">
+                    <span>[+]</span>
+                    <span>READY FOR TRACE // PROTOCOL OK</span>
                   </span>
                 )}
               </motion.div>
-              <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[1.5px] transition-all duration-300 ${isFocused
-                ? 'bg-accent w-full max-w-xl'
-                : 'bg-gradient-to-r from-transparent via-ink/30 group-hover:via-accent to-transparent w-3/4 max-w-lg'
-                }`}></div>
-            </div>
-
-            {/* Removed Validation Badges */}
+            ) : (
+              <div className="flex flex-col items-center select-none h-12">
+                {/* Desktop shortcut hint */}
+                <div className="hidden md:block font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none opacity-30 mt-2">
+                  [ PRESS CTRL+V TO PASTE URL ]
+                </div>
+                
+                {/* Mobile responsive paste icon button */}
+                <div className="block md:hidden mt-1">
+                  <button
+                    type="button"
+                    onClick={handleMobilePaste}
+                    className="w-10 h-10 flex items-center justify-center border border-ink sharp-border bg-base active:bg-ink active:text-[var(--base)] transition-all duration-200 active:shadow-[1.5px_1.5px_0_0_#FF4D00] shadow-[1.5px_1.5px_0_0_#0D0D0D] cursor-pointer interactive-hover"
+                    title="Paste from clipboard"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                      <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Custom Dropdown Configuration Panel */}
             <div className="flex flex-col md:flex-row items-center gap-6 md:gap-8 w-full justify-center">
