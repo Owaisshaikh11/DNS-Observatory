@@ -17,22 +17,22 @@
  *   dns:query                — every query that passes through the local DNS server
  */
 
-const path    = require('path');
-const http    = require('http');
+const path = require('path');
+const http = require('http');
 const express = require('express');
-const cors    = require('cors');
+const cors = require('cors');
 const { Server: SocketIOServer } = require('socket.io');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
-const { connectTelemetry }                   = require('./telemetry-bridge');
+const { connectTelemetry } = require('./telemetry-bridge');
 
 // Pull in the custom DNS server from the sibling directory
-const { startDnsUdpServer }       = require('../../custom-dns-server/server/dns-server');
-const { loadRecords }             = require('../../custom-dns-server/lib/record-manager');
+const { startDnsUdpServer } = require('../../custom-dns-server/server/dns-server');
+const { loadRecords } = require('../../custom-dns-server/lib/record-manager');
 const { loadDynamicSubdomains, cleanupExpiredSubdomains } = require('../../custom-dns-server/lib/dynamic-records');
 
-const API_PORT  = process.env.API_PORT  || 4000;
-const DNS_PORT  = process.env.DNS_PORT  || 5354;
+const API_PORT = process.env.API_PORT || 4000;
+const DNS_PORT = process.env.DNS_PORT || 5354;
 const DNS_RECORDS_PATH = path.resolve(__dirname, '../../custom-dns-server/config/dns-records.json');
 
 // Allow the Vite dev server and any localhost origin during development
@@ -52,9 +52,9 @@ async function start() {
   setInterval(cleanupExpiredSubdomains, 60_000);
 
   // ── 2. Set up Express + Socket.io ──────────────────────────────────────────
-  const app        = express();
+  const app = express();
   const httpServer = http.createServer(app);
-  const io         = new SocketIOServer(httpServer, {
+  const io = new SocketIOServer(httpServer, {
     cors: { origin: CORS_ORIGINS, methods: ['GET', 'POST'] },
   });
 

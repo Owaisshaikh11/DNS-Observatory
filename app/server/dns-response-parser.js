@@ -163,7 +163,7 @@ function parseSection(buffer, offset, count) {
     // don't try to parse them as normal resource records.
     if (typeNum === TYPE_OPT) {
       offset = rdataEnd;
-      records.push({ name: '<OPT>', typeNum, typeName: 'OPT', class: classNum, ttl, value: null });
+      records.push({ name: '<OPT>', typeNum, typeName: 'OPT', class: classNum, ttl, value: `UDP Payload Size: ${classNum}B` });
       continue;
     }
 

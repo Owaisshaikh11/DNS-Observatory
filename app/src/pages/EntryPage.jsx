@@ -299,14 +299,13 @@ export default function EntryPage() {
                     </span>
                   )}
                 </motion.div>
-                
-                <div className={`absolute bottom-0 left-0 w-full h-[1.5px] transition-all duration-300 ${
-                  domainInput.trim()
+
+                <div className={`absolute bottom-0 left-0 w-full h-[1.5px] transition-all duration-300 ${domainInput.trim()
                     ? (validationErrors.length === 0 ? 'bg-green-600' : 'bg-accent')
                     : (isFocused
-                        ? 'bg-accent'
-                        : 'bg-gradient-to-r from-transparent via-ink/30 group-hover:via-accent to-transparent')
-                }`}></div>
+                      ? 'bg-accent'
+                      : 'bg-gradient-to-r from-transparent via-ink/30 group-hover:via-accent to-transparent')
+                  }`}></div>
               </div>
             </div>
 
@@ -344,8 +343,8 @@ export default function EntryPage() {
                 <div className="hidden md:block font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none opacity-30 mt-2">
                   [ PRESS CTRL+V TO PASTE URL ]
                 </div>
-                
-                {/* Mobile responsive paste icon button */}
+
+                {/* Mobile responsive paste button */}
                 <div className="block md:hidden mt-1">
                   <button
                     type="button"

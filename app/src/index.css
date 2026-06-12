@@ -31,13 +31,13 @@
   @keyframes scale-y {
     0%, 100% { transform: scaleY(1); }
     50% { transform: scaleY(0.1); }
-  }
+}
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 }
 
 body {
@@ -49,23 +49,22 @@ body {
 
 /* Functional Brutalism Grid Backgrounds */
 .brutalist-grid {
-    background-size: 40px 40px;
-    background-image: 
-        linear-gradient(to right, rgba(13, 13, 13, 0.06) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(13, 13, 13, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(13, 13, 13, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(13, 13, 13, 0.03) 1px, transparent 1px);
 }
 .brutalist-grid-accent {
-    background-size: 40px 40px;
-    background-image: 
-        linear-gradient(to right, rgba(255, 77, 0, 0.3) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255, 77, 0, 0.3) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 77, 0, 0.3) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 77, 0, 0.3) 1px, transparent 1px);
 }
 @media (hover: none) {
   .brutalist-grid-accent {
     display: none !important;
   }
 }
-
 /* Custom cursor styles */
 @media (hover: hover) {
   * { cursor: none !important; }
