@@ -22,8 +22,8 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
 
   const isClient = hop.type === 'CLIENT';
   const showDnssec = hop.response?.dnssec && (
-    hop.response.dnssec.rrsigPresent || 
-    hop.response.dnssec.dnskeyPresent || 
+    hop.response.dnssec.rrsigPresent ||
+    hop.response.dnssec.dnskeyPresent ||
     hop.response.dnssec.dsPresent
   );
 
@@ -37,17 +37,16 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
           </span>
           {hop.response?.rcode && (
             <span
-              className={`font-mono text-[8.5px] font-bold px-1.5 py-px border border-current select-none ${
-                hop.response.rcode === 'NOERROR' ? 'text-success' : 'text-error'
-              }`}
+              className={`font-mono text-[8.5px] font-bold px-1.5 py-px border border-current select-none ${hop.response.rcode === 'NOERROR' ? 'text-success' : 'text-error'
+                }`}
             >
               {hop.response.rcode}
             </span>
           )}
         </div>
         <div className="font-mono text-[8px] opacity-45 mt-1 leading-normal select-text">
-          SERVER: {hop.server || 'None'} · IP: {hop.ip} · RTT: {hop.latencyMs}ms <br />
-          LOCATION: {hop.geo?.city || 'Unknown'}, {hop.geo?.country || 'Local'} · ISP: {hop.geo?.org || 'Local Network'}
+          SERVER: {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · IP: {hop.type === 'CNAME_REDIRECT' ? 'None' : hop.ip} · RTT: {hop.latencyMs}ms <br />
+          LOCATION: {hop.type === 'CNAME_REDIRECT' ? 'CNAME Record Routing' : `${hop.geo?.city || 'Unknown'}, ${hop.geo?.country || 'Local'}`} · ISP: {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : (hop.geo?.org || 'Local Network')}
         </div>
       </div>
 
@@ -79,7 +78,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
           <span className="text-[13px]">🔒</span>
           <div className="flex flex-col">
             <span className="font-mono text-[8.5px] font-bold text-success uppercase tracking-wider leading-none">
-              DNSSEC Cryptographic Chain Verified
+              DNSSEC Records Present
             </span>
             <span className="font-mono text-[7px] opacity-50 mt-0.5">
               Available Records:{' '}

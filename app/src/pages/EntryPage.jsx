@@ -140,7 +140,7 @@ export default function EntryPage() {
       setRecordType(selectedRecord);
       setIsBenchmarkMode(isBenchmarkModeChecked);
       startTrace(cleanSubmitDomain, selectedRecord);
-      navigate('/trace');
+      navigate(`/trace?q=${cleanSubmitDomain}&type=${selectedRecord}&benchmark=${isBenchmarkModeChecked}`);
     } else {
       setInputError(true);
       setTimeout(() => setInputError(false), 400);

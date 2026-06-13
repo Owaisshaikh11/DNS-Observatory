@@ -44,6 +44,7 @@ const TREE_POSITIONS = {
   ROOT:   { treeX: 370, treeY: 15 },
   TLD:    { treeX: 370, treeY: 95 },
   AUTH:   { treeX: 580, treeY: 55 },
+  CNAME_REDIRECT: { treeX: 0, treeY: 55 },
 };
 
 // ── UDP Query ──────────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
   const latencyMs = Date.now() - start;
 
   const parsed = parseDnsResponse(rawResponse);
-  return { parsed, latencyMs };
+  return { parsed, latencyMs, byteLength: rawResponse.length };
 }
 
 // ── Referral Extraction ────────────────────────────────────────────────────
@@ -174,11 +175,11 @@ async function resolveNsHostname(nsHostname) {
  * Builds a structured hop object from the result of a DNS query.
  * This is the shape that the frontend's HopCard component consumes.
  */
-function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description }) {
+function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain }) {
   return {
     id,
     step,
-    type,                                // 'CLIENT' | 'LOCAL' | 'ROOT' | 'TLD' | 'AUTH'
+    type,                                // 'CLIENT' | 'LOCAL' | 'ROOT' | 'TLD' | 'AUTH' | 'CNAME_REDIRECT'
     label,                               // human-readable label for the UI
     server,                              // hostname of the queried server
     ip,                                  // IP address of the queried server
@@ -187,6 +188,7 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
     cumulativeMs,                        // total time elapsed up to and including this hop
     description,                         // what happened here, in plain English
     geo,                                 // { flag, org, country, city, countryCode }
+    queryDomain: queryDomain || null,
     response: parsed ? {
       rcode:      parsed.rcode,
       flags:      parsed.flags,
@@ -195,6 +197,7 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
       additional: parsed.additional,
       dnssec:     parsed.dnssec,
       rawHex:     parsed.rawHex,
+      byteLength: byteLength || null,
     } : null,
     ...TREE_POSITIONS[type],             // treeX, treeY for SVG layout
   };
@@ -220,251 +223,416 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
  * @returns {Promise<TraceResult>}
  */
 async function iterativeTrace(domain, recordType = 'A') {
-  const typeNum  = TYPE_NUMBERS[recordType.toUpperCase()] || TYPE_NUMBERS.A;
-  const hops     = [];
-  const edges    = [];
-  let   cumulative = 0;
+  const hops = [];
+  const edges = [];
+  let cumulative = 0;
+  let dnssecPresent = false;
+  const cnameChain = [];
+  let authZone = null;
+  let authNs = null;
+  let finalParsed = null;
 
-  // ─── Hop 0: CLIENT ────────────────────────────────────────────────────────
-  hops.push(buildHop({
-    id: 'client', step: 0, type: 'CLIENT',
-    label: 'Client Stub',
-    server: null, ip: '127.0.0.1', port: null,
-    latencyMs: 0, cumulativeMs: 0,
-    parsed: null,
-    geo: { flag: '💻', org: 'Local Machine', country: 'Local', city: null, countryCode: null },
-    description: `Initiating iterative trace for ${domain} [TYPE: ${recordType.toUpperCase()}]. Querying local custom DNS server first.`,
-  }));
+  let currentDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+  let depth = 0;
+  const maxDepth = 4;
 
-  // ─── Hop 1: LOCAL DNS ─────────────────────────────────────────────────────
-  try {
-    const { parsed, latencyMs } = await performHop('127.0.0.1', 5354, domain, typeNum, {
-      recursionDesired: true,  // ask the local server to resolve if it knows the answer
-      dnssecOk: false,
-    });
-    cumulative += latencyMs;
+  while (depth < maxDepth) {
+    const typeNum = TYPE_NUMBERS[recordType.toUpperCase()] || TYPE_NUMBERS.A;
+    const isFirst = depth === 0;
+    const suffix = isFirst ? '' : `-${depth}`;
 
-    const isLocalHit = parsed.isAuthoritative && parsed.answers.length > 0;
-    const localDescription = isLocalHit
-      ? `Local DNS server found an authoritative answer for ${domain}. Returning cached/configured record — no iterative resolution needed.`
-      : `Local DNS server has no authoritative record for ${domain}. Starting iterative resolution from a root server.`;
+    // Hop IDs
+    const clientHopId = `client${suffix}`;
+    const localHopId = `local${suffix}`;
+    const rootHopId = `root${suffix}`;
+    const tldHopId = `tld${suffix}`;
+    const authHopId = `auth${suffix}`;
 
+    // 1. CLIENT Hop
     hops.push(buildHop({
-      id: 'local', step: 1, type: 'LOCAL',
-      label: 'Custom DNS',
-      server: 'localhost', ip: '127.0.0.1', port: 5354,
-      latencyMs, cumulativeMs: cumulative,
-      parsed,
-      geo: { flag: '🖥️', org: 'Local DNS Server', country: 'Local', city: null, countryCode: null },
-      description: localDescription,
+      id: clientHopId,
+      step: hops.length,
+      type: 'CLIENT',
+      label: isFirst ? 'Client Stub' : `Client Stub (${depth})`,
+      server: null,
+      ip: '127.0.0.1',
+      port: null,
+      latencyMs: 0,
+      cumulativeMs: cumulative,
+      parsed: null,
+      geo: { flag: '💻', org: 'Local Machine', country: 'Local', city: null, countryCode: null },
+      queryDomain: currentDomain,
+      description: isFirst
+        ? `Initiating iterative trace for ${currentDomain} [TYPE: ${recordType.toUpperCase()}]. Querying local custom DNS server first.`
+        : `CNAME target resolution: initiating query for ${currentDomain} [TYPE: ${recordType.toUpperCase()}].`,
     }));
-    edges.push({ from: 'client', to: 'local', label: `Query ${domain} ${recordType.toUpperCase()}` });
 
-    // If the local server answered authoritatively, we're done
-    if (isLocalHit) {
-      edges.push({ from: 'local', to: 'auth', label: 'Local authoritative answer' });
-      return buildTraceResult({ domain, recordType, hops, edges, finalParsed: parsed });
+    if (!isFirst) {
+      // Connect previous CNAME node to this client node
+      edges.push({
+        from: `cname-${depth - 1}`,
+        to: clientHopId,
+        label: `Resolve ${currentDomain}`
+      });
     }
 
-  } catch (err) {
-    // Local server is down or unreachable — proceed with public resolution
-    cumulative = 0;
+    // 2. LOCAL Hop
+    let isLocalHit = false;
+    let localParsed = null;
+    let localLatency = 0;
+    let localByteLength = 0;
+
+    try {
+      const { parsed, latencyMs, byteLength } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
+        recursionDesired: true,
+        dnssecOk: false,
+      });
+      localParsed = parsed;
+      localLatency = latencyMs;
+      localByteLength = byteLength;
+      cumulative += latencyMs;
+
+      isLocalHit = parsed.isAuthoritative && parsed.answers.length > 0;
+
+      // If local hit and recordType is 'ALL', query local DNS server for extra records (AAAA, MX, TXT, NS)
+      if (isLocalHit && recordType.toUpperCase() === 'ALL') {
+        const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
+        const extraResults = await Promise.allSettled(
+          extraTypes.map(t => performHop('127.0.0.1', 5354, currentDomain, TYPE_NUMBERS[t], { recursionDesired: true, dnssecOk: false }))
+        );
+        for (const res of extraResults) {
+          if (res.status === 'fulfilled') {
+            localParsed.answers.push(...res.value.parsed.answers);
+            localLatency = Math.max(localLatency, res.value.latencyMs);
+            localByteLength += res.value.byteLength;
+          }
+        }
+      }
+
+      const localDescription = isLocalHit
+        ? `Local DNS server found an authoritative answer for ${currentDomain}. Returning cached/configured record — no iterative resolution needed.`
+        : `Local DNS server has no authoritative record for ${currentDomain}. Starting iterative resolution from a root server.`;
+
+      hops.push(buildHop({
+        id: localHopId,
+        step: hops.length,
+        type: 'LOCAL',
+        label: isFirst ? 'Custom DNS' : `Custom DNS (${depth})`,
+        server: 'localhost',
+        ip: '127.0.0.1',
+        port: 5354,
+        latencyMs: localLatency,
+        cumulativeMs: cumulative,
+        parsed,
+        geo: { flag: '🖥️', org: 'Local DNS Server', country: 'Local', city: null, countryCode: null },
+        queryDomain: currentDomain,
+        description: localDescription,
+        byteLength: localByteLength,
+      }));
+      edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
+
+    } catch (err) {
+      hops.push(buildHop({
+        id: localHopId,
+        step: hops.length,
+        type: 'LOCAL',
+        label: isFirst ? 'Custom DNS' : `Custom DNS (${depth})`,
+        server: 'localhost',
+        ip: '127.0.0.1',
+        port: 5354,
+        latencyMs: 0,
+        cumulativeMs: cumulative,
+        parsed: null,
+        geo: { flag: '🖥️', org: 'Local DNS Server', country: 'Local', city: null, countryCode: null },
+        queryDomain: currentDomain,
+        description: `Local DNS server unreachable (${err.message}). Proceeding with public iterative resolution.`,
+      }));
+      edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
+    }
+
+    if (isLocalHit && localParsed) {
+      edges.push({ from: localHopId, to: authHopId, label: 'Local authoritative answer' });
+      
+      hops.push(buildHop({
+        id: authHopId,
+        step: hops.length,
+        type: 'AUTH',
+        label: isFirst ? 'Authoritative' : `Authoritative (${depth})`,
+        server: 'local-zone',
+        ip: '127.0.0.1:5354',
+        port: 5354,
+        latencyMs: 0,
+        cumulativeMs: cumulative,
+        parsed: localParsed,
+        geo: { flag: '🔐', org: 'Local Auth Zone' },
+        queryDomain: currentDomain,
+        description: `Local custom DNS served authoritative mapping directly.`,
+        byteLength: localByteLength,
+      }));
+
+      finalParsed = localParsed;
+
+      const cnameRec = localParsed.answers.find(r => r.typeName === 'CNAME' && r.name.replace(/\.$/, '').toLowerCase() === currentDomain);
+      if (cnameRec) {
+        const cnameTarget = String(cnameRec.value).replace(/\.$/, '').toLowerCase();
+        cnameChain.push({ from: currentDomain, to: cnameTarget });
+
+        const hasTargetIp = localParsed.answers.some(r => r.name.replace(/\.$/, '').toLowerCase() === cnameTarget && (r.typeName === 'A' || r.typeName === 'AAAA'));
+        if (!hasTargetIp) {
+          const cnameNodeId = `cname-${depth}`;
+          hops.push({
+            id: cnameNodeId,
+            step: hops.length,
+            type: 'CNAME_REDIRECT',
+            label: 'CNAME Redirect',
+            server: null,
+            ip: null,
+            port: null,
+            latencyMs: 0,
+            cumulativeMs: cumulative,
+            description: `CNAME alias detected: ${currentDomain} points to ${cnameTarget}. Following redirection.`,
+            geo: { flag: '🔗', org: 'CNAME Alias' },
+            queryDomain: currentDomain,
+            cnameFrom: currentDomain,
+            cnameTo: cnameTarget,
+            response: null,
+            treeX: 0,
+            treeY: 55,
+          });
+          edges.push({ from: authHopId, to: cnameNodeId, label: 'CNAME Alias' });
+
+          currentDomain = cnameTarget;
+          depth++;
+          continue;
+        }
+      }
+      break;
+    }
+
+    // 3. ROOT Hop
+    const rootServer = ROOT_SERVERS[Math.floor(Math.random() * ROOT_SERVERS.length)];
+    let rootParsed, rootLatency, rootByteLength;
+    try {
+      ({ parsed: rootParsed, latencyMs: rootLatency, byteLength: rootByteLength } = await performHop(
+        rootServer.ipv4, 53, currentDomain, typeNum, { dnssecOk: true }
+      ));
+    } catch (err) {
+      throw new Error(`Root server ${rootServer.name} (${rootServer.ipv4}) timed out: ${err.message}`, { cause: err });
+    }
+
+    cumulative += rootLatency;
+    const rootGeo = await lookupGeoIp(rootServer.ipv4);
+    if (rootParsed.dnssecPresent) dnssecPresent = true;
+
+    if (rootParsed.rcodeNum === 3) {
+      hops.push(buildHop({
+        id: rootHopId, step: hops.length, type: 'ROOT',
+        label: 'Root (.)',
+        server: rootServer.name, ip: rootServer.ipv4, port: 53,
+        latencyMs: rootLatency, cumulativeMs: cumulative,
+        parsed: rootParsed, geo: rootGeo,
+        queryDomain: currentDomain,
+        description: `Root server ${rootServer.name} returned NXDOMAIN. ${currentDomain} does not exist at root level.`,
+        byteLength: rootByteLength,
+      }));
+      edges.push({ from: localHopId, to: rootHopId, label: 'Iterative (RD=0)' });
+      finalParsed = rootParsed;
+      break;
+    }
+
+    let tldRef = extractReferral(rootParsed);
+    if (!tldRef) {
+      const nsRecord = rootParsed.authority.find(r => r.typeName === 'NS');
+      if (nsRecord) {
+        const nsName = String(nsRecord.value).replace(/\.$/, '');
+        const resolvedIp = await resolveNsHostname(nsName);
+        if (resolvedIp) {
+          tldRef = { nsName, ip: resolvedIp, zone: nsRecord.name.replace(/\.$/, '') };
+        }
+      }
+    }
+
+    if (!tldRef) {
+      throw new Error(`Root server returned no usable TLD referral for ${currentDomain}`);
+    }
+
+    const tldZone = tldRef.zone || currentDomain.split('.').slice(-1)[0];
     hops.push(buildHop({
-      id: 'local', step: 1, type: 'LOCAL',
-      label: 'Custom DNS',
-      server: 'localhost', ip: '127.0.0.1', port: 5354,
-      latencyMs: 0, cumulativeMs: 0,
-      parsed: null,
-      geo: { flag: '🖥️', org: 'Local DNS Server', country: 'Local', city: null, countryCode: null },
-      description: `Local DNS server unreachable (${err.message}). Proceeding with public iterative resolution.`,
-    }));
-    edges.push({ from: 'client', to: 'local', label: `Query ${domain} ${recordType.toUpperCase()}` });
-  }
-
-  // ─── Hop 2: ROOT server ───────────────────────────────────────────────────
-  const rootServer = ROOT_SERVERS[Math.floor(Math.random() * ROOT_SERVERS.length)];
-
-  let rootParsed, rootLatency;
-  try {
-    ({ parsed: rootParsed, latencyMs: rootLatency } = await performHop(
-      rootServer.ipv4, 53, domain, typeNum, { dnssecOk: true }
-    ));
-  } catch (err) {
-    throw new Error(`Root server ${rootServer.name} (${rootServer.ipv4}) timed out: ${err.message}`, { cause: err });
-  }
-
-  cumulative += rootLatency;
-  const rootGeo = await lookupGeoIp(rootServer.ipv4);
-
-  // Early exit if root returned NXDOMAIN (very rare)
-  if (rootParsed.rcodeNum === 3 /* NXDOMAIN */) {
-    hops.push(buildHop({
-      id: 'root', step: 2, type: 'ROOT',
+      id: rootHopId, step: hops.length, type: 'ROOT',
       label: 'Root (.)',
       server: rootServer.name, ip: rootServer.ipv4, port: 53,
       latencyMs: rootLatency, cumulativeMs: cumulative,
       parsed: rootParsed, geo: rootGeo,
-      description: `Root server ${rootServer.name} returned NXDOMAIN. ${domain} does not exist at the root level.`,
+      queryDomain: currentDomain,
+      description: `Root server ${rootServer.name} responded with a referral to the .${tldZone} TLD nameservers.`,
+      byteLength: rootByteLength,
     }));
-    edges.push({ from: 'local', to: 'root', label: 'Iterative (RD=0)' });
-    return buildTraceResult({ domain, recordType, hops, edges, finalParsed: rootParsed });
-  }
+    edges.push({ from: localHopId, to: rootHopId, label: 'Iterative (RD=0)' });
 
-  // Extract the TLD referral from the root response
-  let tldRef = extractReferral(rootParsed);
-  if (!tldRef) {
-    // No glue — resolve NS hostname using a recursive lookup
-    const nsRecord = rootParsed.authority.find(r => r.typeName === 'NS');
-    if (nsRecord) {
-      const nsName = String(nsRecord.value).replace(/\.$/, '');
-      const resolvedIp = await resolveNsHostname(nsName);
-      if (resolvedIp) {
-        tldRef = { nsName, ip: resolvedIp, zone: nsRecord.name.replace(/\.$/, '') };
+    // 4. TLD Hop
+    let tldParsed, tldLatency, tldByteLength;
+    try {
+      ({ parsed: tldParsed, latencyMs: tldLatency, byteLength: tldByteLength } = await performHop(
+        tldRef.ip, 53, currentDomain, typeNum, { dnssecOk: true }
+      ));
+    } catch (err) {
+      throw new Error(`TLD server ${tldRef.nsName} (${tldRef.ip}) timed out: ${err.message}`, { cause: err });
+    }
+
+    cumulative += tldLatency;
+    const tldGeo = await lookupGeoIp(tldRef.ip);
+    if (tldParsed.dnssecPresent) dnssecPresent = true;
+
+    if (tldParsed.rcodeNum === 3) {
+      hops.push(buildHop({
+        id: tldHopId, step: hops.length, type: 'TLD',
+        label: `TLD (.${tldZone})`,
+        server: tldRef.nsName, ip: tldRef.ip, port: 53,
+        latencyMs: tldLatency, cumulativeMs: cumulative,
+        parsed: tldParsed, geo: tldGeo,
+        queryDomain: currentDomain,
+        description: `TLD server returned NXDOMAIN. ${currentDomain} is not registered in .${tldZone}.`,
+        byteLength: tldByteLength,
+      }));
+      edges.push({ from: rootHopId, to: tldHopId, label: `NS .${tldZone} → ${tldRef.nsName}` });
+      finalParsed = tldParsed;
+      break;
+    }
+
+    let authRef = extractReferral(tldParsed);
+    if (!authRef) {
+      const nsRecord = tldParsed.authority.find(r => r.typeName === 'NS');
+      if (nsRecord) {
+        const nsName = String(nsRecord.value).replace(/\.$/, '');
+        const resolvedIp = await resolveNsHostname(nsName);
+        if (resolvedIp) {
+          authRef = { nsName, ip: resolvedIp, zone: nsRecord.name.replace(/\.$/, '') };
+        }
       }
     }
-  }
 
-  if (!tldRef) {
-    throw new Error(`Root server returned no usable TLD referral for ${domain}`);
-  }
+    if (!authRef) {
+      throw new Error(`TLD server returned no usable authoritative referral for ${currentDomain}`);
+    }
 
-  const tldZone = tldRef.zone || domain.split('.').slice(-1)[0]; // e.g. "com"
-
-  hops.push(buildHop({
-    id: 'root', step: 2, type: 'ROOT',
-    label: 'Root (.)',
-    server: rootServer.name, ip: rootServer.ipv4, port: 53,
-    latencyMs: rootLatency, cumulativeMs: cumulative,
-    parsed: rootParsed, geo: rootGeo,
-    description: `Root server ${rootServer.name} responded with a referral to the .${tldZone} TLD nameservers. No answer yet — following the delegation chain.`,
-  }));
-  edges.push({ from: 'local', to: 'root', label: 'Iterative (RD=0)' });
-
-  // ─── Hop 3: TLD server ────────────────────────────────────────────────────
-  let tldParsed, tldLatency;
-  try {
-    ({ parsed: tldParsed, latencyMs: tldLatency } = await performHop(
-      tldRef.ip, 53, domain, typeNum, { dnssecOk: true }
-    ));
-  } catch (err) {
-    throw new Error(`TLD server ${tldRef.nsName} (${tldRef.ip}) timed out: ${err.message}`, { cause: err });
-  }
-
-  cumulative += tldLatency;
-  const tldGeo = await lookupGeoIp(tldRef.ip);
-
-  // NXDOMAIN at TLD level means the domain doesn't exist in this TLD
-  if (tldParsed.rcodeNum === 3) {
+    const authZoneVal = authRef.zone || currentDomain;
     hops.push(buildHop({
-      id: 'tld', step: 3, type: 'TLD',
+      id: tldHopId, step: hops.length, type: 'TLD',
       label: `TLD (.${tldZone})`,
       server: tldRef.nsName, ip: tldRef.ip, port: 53,
       latencyMs: tldLatency, cumulativeMs: cumulative,
       parsed: tldParsed, geo: tldGeo,
-      description: `TLD server returned NXDOMAIN. ${domain} is not a registered domain in .${tldZone}.`,
+      queryDomain: currentDomain,
+      description: `TLD server ${tldRef.nsName} responded with a referral to the ${authZoneVal} authoritative nameservers.`,
+      byteLength: tldByteLength,
     }));
-    edges.push({ from: 'root', to: 'tld', label: `NS .${tldZone} → ${tldRef.nsName}` });
-    return buildTraceResult({ domain, recordType, hops, edges, finalParsed: tldParsed });
-  }
+    edges.push({ from: rootHopId, to: tldHopId, label: `NS .${tldZone} → ${tldRef.nsName}` });
 
-  // Extract the authoritative server referral
-  let authRef = extractReferral(tldParsed);
-  if (!authRef) {
-    const nsRecord = tldParsed.authority.find(r => r.typeName === 'NS');
-    if (nsRecord) {
-      const nsName = String(nsRecord.value).replace(/\.$/, '');
-      const resolvedIp = await resolveNsHostname(nsName);
-      if (resolvedIp) {
-        authRef = { nsName, ip: resolvedIp, zone: nsRecord.name.replace(/\.$/, '') };
+    // 5. AUTH Hop
+    let authParsed, authLatency, authByteLength;
+    try {
+      ({ parsed: authParsed, latencyMs: authLatency, byteLength: authByteLength } = await performHop(
+        authRef.ip, 53, currentDomain, typeNum, { dnssecOk: true }
+      ));
+    } catch (err) {
+      throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) timed out: ${err.message}`, { cause: err });
+    }
+
+    cumulative += authLatency;
+    const authGeo = await lookupGeoIp(authRef.ip);
+    if (authParsed.dnssecPresent) dnssecPresent = true;
+    if (isFirst) {
+      authZone = authZoneVal;
+      authNs = authRef.nsName;
+    }
+
+    let extraAnswers = [];
+    if (recordType.toUpperCase() === 'ALL') {
+      const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
+      const results = await Promise.allSettled(
+        extraTypes.map(t => performHop(authRef.ip, 53, currentDomain, TYPE_NUMBERS[t], { dnssecOk: false }))
+      );
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          extraAnswers.push(...result.value.parsed.answers);
+        }
       }
     }
-  }
 
-  if (!authRef) {
-    throw new Error(`TLD server returned no usable authoritative NS referral for ${domain}`);
-  }
+    const finalAnswers = [...authParsed.answers, ...extraAnswers];
+    authParsed.answers = finalAnswers;
+    finalParsed = authParsed;
 
-  const authZone = authRef.zone || domain;
+    let authDescription;
+    if (authParsed.rcodeNum === 3) {
+      authDescription = `Authoritative server ${authRef.nsName} returned NXDOMAIN. ${currentDomain} has no record in the ${authZoneVal} zone.`;
+    } else if (finalAnswers.length > 0) {
+      const first = finalAnswers[0];
+      const valueStr = typeof first.value === 'string' ? first.value : JSON.stringify(first.value);
+      authDescription = `Authoritative server ${authRef.nsName} returned final answer. ${first.typeName} record: ${valueStr}.${extraAnswers.length > 0 ? ` Plus ${extraAnswers.length} extra records for ALL.` : ''}`;
+    } else {
+      authDescription = `Authoritative server ${authRef.nsName} responded but returned no ${recordType.toUpperCase()} records for ${currentDomain}.`;
+    }
 
-  hops.push(buildHop({
-    id: 'tld', step: 3, type: 'TLD',
-    label: `TLD (.${tldZone})`,
-    server: tldRef.nsName, ip: tldRef.ip, port: 53,
-    latencyMs: tldLatency, cumulativeMs: cumulative,
-    parsed: tldParsed, geo: tldGeo,
-    description: `TLD server ${tldRef.nsName} responded with a referral to the ${authZone} authoritative nameservers. Almost there.`,
-  }));
-  edges.push({ from: 'root', to: 'tld', label: `NS .${tldZone} → ${tldRef.nsName}` });
+    hops.push(buildHop({
+      id: authHopId, step: hops.length, type: 'AUTH',
+      label: isFirst ? 'Authoritative' : `Authoritative (${depth})`,
+      server: authRef.nsName, ip: authRef.ip, port: 53,
+      latencyMs: authLatency, cumulativeMs: cumulative,
+      parsed: authParsed, geo: authGeo,
+      queryDomain: currentDomain,
+      description: authDescription,
+      byteLength: authByteLength,
+    }));
+    edges.push({ from: tldHopId, to: authHopId, label: `NS ${authZoneVal} → ${authRef.nsName}` });
 
-  // ─── Hop 4: Authoritative server ──────────────────────────────────────────
-  let authParsed, authLatency;
-  try {
-    ({ parsed: authParsed, latencyMs: authLatency } = await performHop(
-      authRef.ip, 53, domain, typeNum, { dnssecOk: true }
-    ));
-  } catch (err) {
-    throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) timed out: ${err.message}`, { cause: err });
-  }
+    const cnameRec = finalAnswers.find(r => r.typeName === 'CNAME' && r.name.replace(/\.$/, '').toLowerCase() === currentDomain);
+    if (cnameRec) {
+      const cnameTarget = String(cnameRec.value).replace(/\.$/, '').toLowerCase();
+      cnameChain.push({ from: currentDomain, to: cnameTarget });
 
-  cumulative += authLatency;
-  const authGeo = await lookupGeoIp(authRef.ip);
+      const hasTargetIp = finalAnswers.some(r => r.name.replace(/\.$/, '').toLowerCase() === cnameTarget && (r.typeName === 'A' || r.typeName === 'AAAA'));
+      if (!hasTargetIp) {
+        const cnameNodeId = `cname-${depth}`;
+        hops.push({
+          id: cnameNodeId,
+          step: hops.length,
+          type: 'CNAME_REDIRECT',
+          label: 'CNAME Redirect',
+          server: null,
+          ip: null,
+          port: null,
+          latencyMs: 0,
+          cumulativeMs: cumulative,
+          description: `CNAME alias detected: ${currentDomain} points to ${cnameTarget}. Following redirection.`,
+          geo: { flag: '🔗', org: 'CNAME Alias' },
+          queryDomain: currentDomain,
+          cnameFrom: currentDomain,
+          cnameTo: cnameTarget,
+          response: null,
+          treeX: 0,
+          treeY: 55,
+        });
+        edges.push({ from: authHopId, to: cnameNodeId, label: 'CNAME Alias' });
 
-  // ── For "ALL" type: run extra queries against the same auth server ─────────
-  // We already have the auth server IP, so we query it directly for AAAA, MX,
-  // TXT, NS without repeating the full delegation chain.
-  let extraAnswers = [];
-  if (recordType.toUpperCase() === 'ALL') {
-    const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
-    const results = await Promise.allSettled(
-      extraTypes.map(t => performHop(authRef.ip, 53, domain, TYPE_NUMBERS[t], { dnssecOk: false }))
-    );
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        extraAnswers.push(...result.value.parsed.answers);
+        currentDomain = cnameTarget;
+        depth++;
+        continue;
       }
     }
+    break;
   }
-
-  const finalAnswers = [...authParsed.answers, ...extraAnswers];
-
-  // Build the auth hop description
-  let authDescription;
-  if (authParsed.rcodeNum === 3) {
-    authDescription = `Authoritative server ${authRef.nsName} returned NXDOMAIN. ${domain} has no ${recordType.toUpperCase()} record in the ${authZone} zone.`;
-  } else if (finalAnswers.length > 0) {
-    const first = finalAnswers[0];
-    const valueStr = typeof first.value === 'string' ? first.value : JSON.stringify(first.value);
-    authDescription = `Authoritative server ${authRef.nsName} returned a final answer with the AA flag set. ${first.typeName} record: ${valueStr}.${extraAnswers.length > 0 ? ` Plus ${extraAnswers.length} additional records for ALL query.` : ''}`;
-  } else {
-    authDescription = `Authoritative server ${authRef.nsName} responded (AA flag set) but returned no ${recordType.toUpperCase()} records for ${domain}.`;
-  }
-
-  // Detect CNAME chains in the answer (CNAME → target)
-  const cnameChain = finalAnswers
-    .filter(r => r.typeName === 'CNAME')
-    .map(r => ({ from: r.name, to: String(r.value) }));
-
-  hops.push(buildHop({
-    id: 'auth', step: 4, type: 'AUTH',
-    label: 'Authoritative',
-    server: authRef.nsName, ip: authRef.ip, port: 53,
-    latencyMs: authLatency, cumulativeMs: cumulative,
-    parsed: { ...authParsed, answers: finalAnswers },
-    geo: authGeo,
-    description: authDescription,
-  }));
-  edges.push({ from: 'tld', to: 'auth', label: `NS ${authZone} → ${authRef.nsName}` });
-
-  const dnssecPresent =
-    rootParsed.dnssecPresent || tldParsed.dnssecPresent || authParsed.dnssecPresent;
 
   return buildTraceResult({
-    domain, recordType, hops, edges,
-    finalParsed: { ...authParsed, answers: finalAnswers },
+    domain,
+    recordType,
+    hops,
+    edges,
+    finalParsed,
     dnssecPresent,
     cnameChain,
     authZone,
-    authNs: authRef.nsName,
+    authNs,
   });
 }
 

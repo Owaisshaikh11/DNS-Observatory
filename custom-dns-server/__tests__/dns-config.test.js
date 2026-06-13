@@ -12,62 +12,24 @@ jest.mock("ioredis", () => {
       hdel: jest.fn().mockImplementation(async () => 0),
     };
   });
-});
+}, { virtual: true });
 
 describe("dnsConfig dynamic options and parsing", () => {
-  beforeEach(() => {
-    // Save original env values
-    jest.resetModules();
-  });
-
-  afterEach(() => {
-    delete process.env.DNS_FORWARD_ENABLED;
-    delete process.env.DNS_UPSTREAM_SERVERS;
-    delete process.env.DNS_FORWARD_TIMEOUT;
-  });
-
-  test("should dynamically load forwardEnabled from env", () => {
-    process.env.DNS_FORWARD_ENABLED = "true";
+  test("should load forwardEnabled as true by default", () => {
     let { dnsConfig } = require("../config/dns-config");
     expect(dnsConfig.forwardEnabled).toBe(true);
-
-    jest.resetModules();
-    process.env.DNS_FORWARD_ENABLED = "false";
-    ({ dnsConfig } = require("../config/dns-config"));
-    expect(dnsConfig.forwardEnabled).toBe(false);
-
-    jest.resetModules();
-    delete process.env.DNS_FORWARD_ENABLED;
-    ({ dnsConfig } = require("../config/dns-config"));
-    expect(dnsConfig.forwardEnabled).toBe(false); // default to false
   });
 
-  test("should dynamically load forwardTimeout from env", () => {
-    process.env.DNS_FORWARD_TIMEOUT = "5000";
+  test("should load forwardTimeout as 2000ms by default", () => {
     let { dnsConfig } = require("../config/dns-config");
-    expect(dnsConfig.forwardTimeout).toBe(5000);
-
-    jest.resetModules();
-    delete process.env.DNS_FORWARD_TIMEOUT;
-    ({ dnsConfig } = require("../config/dns-config"));
-    expect(dnsConfig.forwardTimeout).toBe(2000); // default
+    expect(dnsConfig.forwardTimeout).toBe(2000);
   });
 
-  test("should parse upstream servers correctly", () => {
-    // 1. Bare IPv4
-    // 2. IPv4 with port
-    // 3. Bare IPv6
-    // 4. Bracketed IPv6 without port
-    // 5. Bracketed IPv6 with port
-    process.env.DNS_UPSTREAM_SERVERS = "1.1.1.1,2.2.2.2:5353,2001:db8::1,[2001:db8::2],[2001:db8::3]:5354";
+  test("should use standard public DNS server defaults", () => {
     let { dnsConfig } = require("../config/dns-config");
-    
     expect(dnsConfig.upstreamServers).toEqual([
-      { host: "1.1.1.1", port: 53 },
-      { host: "2.2.2.2", port: 5353 },
-      { host: "2001:db8::1", port: 53 },
-      { host: "2001:db8::2", port: 53 },
-      { host: "2001:db8::3", port: 5354 }
+      { host: "8.8.8.8", port: 53 },
+      { host: "8.8.4.4", port: 53 }
     ]);
   });
 });

@@ -45,9 +45,8 @@ export default function RecordTable({ records, accent, secondsElapsed = 0 }) {
         return (
           <div
             key={i}
-            className={`relative grid grid-cols-[1fr_36px_56px_1.2fr] gap-2 px-1.5 py-0.5 border-b border-ink/5 last:border-b-0 items-center font-mono text-[9px] transition-all duration-300 packet-field ${
-              isExpired ? 'opacity-35 select-none' : ''
-            }`}
+            className={`relative grid grid-cols-[1fr_36px_56px_1.2fr] gap-2 px-1.5 py-0.5 border-b border-ink/5 last:border-b-0 items-center font-mono text-[9px] transition-all duration-300 packet-field ${isExpired ? 'opacity-35 select-none' : ''
+              }`}
           >
             {/* Name */}
             <span className="truncate text-ink/60" title={rec.name}>

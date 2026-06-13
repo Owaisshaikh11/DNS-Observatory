@@ -64,7 +64,10 @@ function startDnsUdpServer(port = 53) {
           server.send(responseMsg, rinfo.port, rinfo.address, (sendErr) => {
             if (sendErr) console.error("Error sending forwarded DNS response:", sendErr);
           });
-          _emitQuery(dnsEvents, question, rinfo, 0, startTime, false);
+          // Decode response RCODE from raw DNS response header (byte index 2-3)
+          const responseFlags = responseMsg.length >= 4 ? responseMsg.readUInt16BE(2) : 0;
+          const rcode = responseFlags & 0x000f;
+          _emitQuery(dnsEvents, question, rinfo, rcode, startTime, false);
         } else {
           console.warn(`Upstream resolution failed for ${question.name}. Sending SERVFAIL.`);
           const response = createResponse(query, [], 2); // RCODE 2 = SERVFAIL
@@ -78,12 +81,14 @@ function startDnsUdpServer(port = 53) {
 
       // Local resolution
       const answers = getRecordsForDomain(question.name, question.type);
-      const response = createResponse(query, answers);
+      const isLocal = isLocalDomain(question.name);
+      const rcode = isLocal ? 0 : 3; // RCODE 3 = NXDOMAIN for unknown domains
+      const response = createResponse(query, answers, rcode);
       server.send(response, rinfo.port, rinfo.address, (sendErr) => {
         if (sendErr) console.error("Error sending DNS response:", sendErr);
       });
 
-      _emitQuery(dnsEvents, question, rinfo, 0, startTime, true);
+      _emitQuery(dnsEvents, question, rinfo, rcode, startTime, true);
     } catch (err) {
       console.error("Error resolving DNS query:", err);
       try {

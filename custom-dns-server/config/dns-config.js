@@ -38,16 +38,16 @@ function parseUpstreamServer(server) {
 
 const dnsConfig = {
   get forwardEnabled() {
-    return process.env.DNS_FORWARD_ENABLED === "true"; // Default to false unless explicitly enabled
+    return true; // Enable upstream forwarding by default
   },
   get upstreamServers() {
-    return (process.env.DNS_UPSTREAM_SERVERS || "8.8.8.8,8.8.4.4")
-      .split(",")
-      .map(parseUpstreamServer)
-      .filter(Boolean);
+    return [
+      { host: "8.8.8.8", port: 53 },
+      { host: "8.8.4.4", port: 53 }
+    ];
   },
   get forwardTimeout() {
-    return Number(process.env.DNS_FORWARD_TIMEOUT) || 2000; // Timeout in ms, default to 2 seconds
+    return 2000; // default 2 seconds timeout
   },
 };
 

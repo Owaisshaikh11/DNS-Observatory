@@ -8,6 +8,7 @@ const {
   TYPE_TXT,
   CLASS_IN,
   DEFAULT_TTL,
+  TYPE_ANY,
 } = require("./types");
 const { dynamicSubdomains } = require("./dynamic-records");
 
@@ -22,7 +23,7 @@ function getRecordsForDomain(domain, type) {
     const isValidDynamicRecord = data.isPersistent || Date.now() < data.expires;
     if (isValidDynamicRecord) {
       // ensures the subdomain is not expired based on timestamp
-      if (type === TYPE_A || type === 0) {
+      if (type === TYPE_A || type === TYPE_ANY) {
         answers.push({
           type: TYPE_A,
           class: CLASS_IN,
@@ -68,9 +69,19 @@ function getRecordsForDomain(domain, type) {
     }
   };
 
-  const match =
-    records[domainLower] ||
-    records[`*.${domainLower.split(".").slice(1).join(".")}`];
+  // Hierarchical wildcard and direct match logic
+  let match = records[domainLower];
+  if (!match) {
+    const labels = domainLower.split(".");
+    for (let i = 1; i < labels.length; i++) {
+      const parentDomain = labels.slice(i).join(".");
+      const wildcardPattern = `*.${parentDomain}`;
+      if (records[wildcardPattern]) {
+        match = records[wildcardPattern];
+        break;
+      }
+    }
+  }
 
   if (match) {
     if (match.expires && Date.now() > match.expires) {
@@ -93,7 +104,7 @@ function getRecordsForDomain(domain, type) {
         ? match.type
         : typeMap[match.type.toUpperCase()];
 
-      if (recordTypeNum && (type === 0 || type === recordTypeNum)) {
+      if (recordTypeNum && (type === TYPE_ANY || type === recordTypeNum)) {
         answers.push({
           type: recordTypeNum,
           class: CLASS_IN,
@@ -103,12 +114,12 @@ function getRecordsForDomain(domain, type) {
       }
     } else {
       // Static multi-record array format
-      if (type === 0 || type === TYPE_A) add(match.A, TYPE_A);
-      if (type === 0 || type === TYPE_AAAA) add(match.AAAA, TYPE_AAAA);
-      if (type === 0 || type === TYPE_CNAME) add(match.CNAME, TYPE_CNAME);
-      if (type === 0 || type === TYPE_NS) add(match.NS, TYPE_NS);
-      if (type === 0 || type === TYPE_MX) add(match.MX, TYPE_MX);
-      if (type === 0 || type === TYPE_TXT) add(match.TXT, TYPE_TXT);
+      if (type === TYPE_ANY || type === TYPE_A) add(match.A, TYPE_A);
+      if (type === TYPE_ANY || type === TYPE_AAAA) add(match.AAAA, TYPE_AAAA);
+      if (type === TYPE_ANY || type === TYPE_CNAME) add(match.CNAME, TYPE_CNAME);
+      if (type === TYPE_ANY || type === TYPE_NS) add(match.NS, TYPE_NS);
+      if (type === TYPE_ANY || type === TYPE_MX) add(match.MX, TYPE_MX);
+      if (type === TYPE_ANY || type === TYPE_TXT) add(match.TXT, TYPE_TXT);
     }
   }
 
@@ -130,9 +141,18 @@ function isLocalDomain(domain) {
     return true;
   }
   const records = getRecordsSync();
-  const match =
-    records[domainLower] ||
-    records[`*.${domainLower.split(".").slice(1).join(".")}`];
+  let match = records[domainLower];
+  if (!match) {
+    const labels = domainLower.split(".");
+    for (let i = 1; i < labels.length; i++) {
+      const parentDomain = labels.slice(i).join(".");
+      const wildcardPattern = `*.${parentDomain}`;
+      if (records[wildcardPattern]) {
+        match = records[wildcardPattern];
+        break;
+      }
+    }
+  }
   return !!match;
 }
 

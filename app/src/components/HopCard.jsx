@@ -13,6 +13,13 @@ const HOP_COLORS_MAP = {
   AUTH: 'border-accent bg-accent text-base',
 };
 
+const cleanOrg = (org) => {
+  if (!org) return '';
+  return org
+    .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
+    .trim();
+};
+
 export default function HopCard({ hop, index, totalLatency, isSelected, onSelect, secondsElapsed = 0, isReached = true, compact = false }) {
   const [expanded, setExpanded] = useState(false);
   const [showHex, setShowHex] = useState(false);
@@ -43,22 +50,24 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
   };
 
   const showDnssec = hop.response?.dnssec && (
-    hop.response.dnssec.rrsigPresent || 
-    hop.response.dnssec.dnskeyPresent || 
+    hop.response.dnssec.rrsigPresent ||
+    hop.response.dnssec.dnskeyPresent ||
     hop.response.dnssec.dsPresent
   );
 
+  const isCname = hop.type === 'CNAME_REDIRECT';
+
   return (
-    <div ref={cardRef} className="flex flex-col select-none">
+    <div ref={cardRef} className="flex flex-col select-none mb-2.5 last:mb-0">
       {/* Card Border Container */}
       <div
-        className={`border border-ink transition-all duration-200 ${
-          isSelected
-            ? 'border-accent bg-white shadow-[2px_2px_0_0_rgba(255,77,0,0.12)]'
-            : 'bg-white hover:border-ink/80 hover:translate-y-[-0.5px] hover:shadow-[1px_1px_0_0_rgba(13,13,13,1)]'
-        } ${
-          !isReached ? 'opacity-30 pointer-events-none filter grayscale select-none' : ''
-        }`}
+        className={`border transition-all duration-200 ${isSelected
+            ? isCname
+              ? 'border-accent bg-accent text-white shadow-[2px_2px_0_0_#0D0D0D]'
+              : 'border-ink bg-ink text-base shadow-[2.5px_2.5px_0_0_#FF4D00]'
+            : 'border-ink bg-white hover:border-ink/80 hover:translate-y-[-0.5px] hover:shadow-[1px_1px_0_0_rgba(13,13,13,1)]'
+          } ${!isReached ? 'opacity-30 pointer-events-none filter grayscale select-none' : ''
+          }`}
       >
         {/* Main Row / Header: Redesigned into 5-column layout aligning with telemetry scale */}
         <div
@@ -67,13 +76,14 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
         >
           {/* Step Badge */}
           <div
-            className={`w-6 h-6 flex items-center justify-center border font-mono text-[9.5px] font-bold select-none ${
-              isClient
-                ? 'border-ink bg-ink/10 text-ink/60'
-                : hop.type === 'AUTH' || hop.response?.flags?.includes('AA')
-                ? 'border-accent bg-accent text-white'
-                : 'border-ink bg-ink text-white'
-            }`}
+            className={`w-6 h-6 flex items-center justify-center border font-mono text-[9.5px] font-bold select-none ${isSelected
+                ? 'border-base bg-base text-ink'
+                : isClient
+                  ? 'border-ink bg-ink/10 text-ink/60'
+                  : hop.type === 'AUTH' || hop.response?.flags?.includes('AA')
+                    ? 'border-accent bg-accent text-white'
+                    : 'border-ink bg-ink text-white'
+              }`}
           >
             {hop.step}
           </div>
@@ -82,19 +92,32 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
           <div className="flex flex-col gap-0.5 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] select-none">{isClient ? '🖥️' : (hop.geo?.flag || '🌐')}</span>
-              <span className="font-display text-[9.5px] font-black uppercase tracking-tight truncate text-ink">
+              <span className={`font-display text-[9.5px] font-black uppercase tracking-tight truncate ${isSelected ? 'text-white' : 'text-ink'}`}>
                 {hop.label}
               </span>
               {hop.response?.flags?.includes('AA') && (
-                <span className="font-mono text-[6.5px] px-0.5 bg-accent text-white font-bold select-none leading-none">
+                <span className={`font-mono text-[6.5px] px-0.5 font-bold select-none leading-none ${isSelected ? 'bg-base text-ink' : 'bg-accent text-white'}`}>
                   AUTH
                 </span>
               )}
+              {showDnssec && (
+                <span
+                  className="text-[9px] select-none cursor-help leading-none shrink-0"
+                  title="DNSSEC Verified"
+                >
+                  🔒
+                </span>
+              )}
             </div>
-            <div className="font-mono text-[7.5px] opacity-40 truncate">
+            <div className={`font-mono text-[7.5px] truncate ${isSelected ? 'text-white/60' : 'opacity-40 text-ink'}`}>
               {hop.server && `${hop.server.split('.')[0]} · `}
               {hop.ip}
             </div>
+            {hop.geo?.org && (
+              <div className={`font-mono text-[6.5px] truncate ${isSelected ? 'text-white/40' : 'text-ink/30'} mt-0.5 font-medium`}>
+                {cleanOrg(hop.geo.org)}
+              </div>
+            )}
           </div>
 
           {/* Proportional Latency Bar */}
@@ -105,11 +128,11 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
               totalMs={totalLatency}
             />
           ) : (
-            <div className="h-2.5 bg-ink/5 border border-ink/10 relative overflow-hidden" />
+            <div className={`h-2.5 border relative overflow-hidden ${isSelected ? 'bg-white/10 border-white/10' : 'bg-ink/5 border-ink/10'}`} />
           )}
 
           {/* RTT Display */}
-          <div className="font-mono text-[10px] font-bold text-accent text-right select-text">
+          <div className={`font-mono text-[10px] font-bold text-right select-text ${isSelected ? 'text-white' : 'text-accent'}`}>
             {hop.latencyMs}ms
           </div>
 
@@ -117,11 +140,12 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
           <div className="text-right flex items-center justify-end select-none">
             {hop.response?.rcode && (
               <span
-                className={`font-mono text-[8px] font-bold px-1.5 py-0.5 border ${
-                  hop.response.rcode === 'NOERROR'
-                    ? 'border-green-500/30 bg-green-500/5 text-green-600'
-                    : 'border-red-500/30 bg-red-500/5 text-red-600'
-                }`}
+                className={`font-mono text-[8px] font-bold px-1.5 py-0.5 border ${isSelected
+                    ? 'border-white/30 bg-white/10 text-white'
+                    : hop.response.rcode === 'NOERROR'
+                      ? 'border-green-500/30 bg-green-500/5 text-green-600'
+                      : 'border-red-500/30 bg-red-500/5 text-red-600'
+                  }`}
               >
                 {hop.response.rcode}
               </span>
@@ -170,7 +194,7 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
                     <span className="text-[14px]">🔒</span>
                     <div className="flex flex-col">
                       <span className="font-mono text-[9px] font-bold text-success uppercase tracking-wider leading-none">
-                        DNSSEC Cryptographic Signature Verified
+                        DNSSEC Signature Present
                       </span>
                       <span className="font-mono text-[7.5px] opacity-50 mt-0.5">
                         Found records:{' '}

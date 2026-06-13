@@ -20,6 +20,7 @@ module.exports = {
   TYPE_DS:     43,  // Delegation Signer
   TYPE_RRSIG:  46,  // DNSSEC Signature
   TYPE_DNSKEY: 48,  // DNSSEC Key
+  TYPE_ANY:    255, // Wildcard query (matches any type)
 
   CLASS_IN: 1,
 

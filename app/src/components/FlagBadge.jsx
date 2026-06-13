@@ -18,7 +18,7 @@ export default function FlagBadge({ flag }) {
                 color: tip ? 'var(--color-accent)' : 'var(--color-ink)'
             }}>[{flag}]</span>
             {tip && FLAG_DESC[flag] && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 p-2.5 bg-[#F0EDE8] border border-[#0D0D0D] text-[10px] leading-tight font-sans whitespace-normal z-[100]" style={{
+                <div className="absolute bottom-full left-0 mb-2 w-52 p-2.5 bg-[#F0EDE8] border border-[#0D0D0D] text-[10px] leading-tight font-sans whitespace-normal z-[100]" style={{
                     boxShadow: '3px 3px 0 0 var(--color-accent)'
                 }}>
                     <strong className="font-mono text-[#FF4D00] block mb-1 text-[9px]">{flag}</strong>

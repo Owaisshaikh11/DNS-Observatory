@@ -31,7 +31,7 @@ jest.mock("ioredis", () => {
       }),
     };
   });
-});
+}, { virtual: true });
 
 const {
   loadRecords,
@@ -46,7 +46,7 @@ const {
   cleanupExpiredSubdomains
 } = require("../lib/dynamic-records");
 const { getRecordsForDomain, isLocalDomain } = require("../lib/dns-resolver");
-const { TYPE_A, TYPE_TXT, TYPE_AAAA } = require("../lib/types");
+const { TYPE_A, TYPE_TXT, TYPE_AAAA, TYPE_ANY } = require("../lib/types");
 
 const TEMP_RECORDS_PATH = path.join(__dirname, "temp-dns-records.json");
 
@@ -115,6 +115,20 @@ describe("DNS Resolver & Record Manager", () => {
       const answers = getRecordsForDomain("sub.wildcard.test", TYPE_A);
       expect(answers.length).toBe(1);
       expect(answers[0].data).toBe("127.0.0.9");
+    });
+
+    test("should resolve hierarchical nested wildcard subdomains", () => {
+      const answers = getRecordsForDomain("nested.sub.wildcard.test", TYPE_A);
+      expect(answers.length).toBe(1);
+      expect(answers[0].data).toBe("127.0.0.9");
+    });
+
+    test("should resolve standard ANY queries mapped as TYPE_ANY", () => {
+      const answers = getRecordsForDomain("example.com", TYPE_ANY);
+      expect(answers.length).toBe(2);
+      const types = answers.map(a => a.type);
+      expect(types).toContain(TYPE_A);
+      expect(types).toContain(TYPE_AAAA);
     });
   });
 

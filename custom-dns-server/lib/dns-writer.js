@@ -111,10 +111,25 @@ function writeAnswer(buffer, offset, name, answer) {
       break;
 
     case TYPE_TXT: {
-      const txtLen = Math.min(answer.data.length, 255);
-      buffer.writeUInt8(txtLen, dataOffset);
-      buffer.write(answer.data.slice(0, txtLen), dataOffset + 1);
-      length = 1 + txtLen;
+      let dataPos = 0;
+      let txtOffset = dataOffset;
+      const textBuffer = Buffer.from(answer.data, 'utf8');
+      const totalLen = textBuffer.length;
+
+      if (totalLen === 0) {
+        buffer.writeUInt8(0, txtOffset);
+        txtOffset += 1;
+      } else {
+        while (dataPos < totalLen) {
+          const chunkLen = Math.min(totalLen - dataPos, 255);
+          buffer.writeUInt8(chunkLen, txtOffset);
+          txtOffset += 1;
+          textBuffer.copy(buffer, txtOffset, dataPos, dataPos + chunkLen);
+          txtOffset += chunkLen;
+          dataPos += chunkLen;
+        }
+      }
+      length = txtOffset - dataOffset;
       break;
     }
     case TYPE_SOA: {

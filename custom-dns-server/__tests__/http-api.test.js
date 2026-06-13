@@ -32,7 +32,7 @@ jest.mock("ioredis", () => {
       }),
     };
   });
-});
+}, { virtual: true });
 
 const { startHttpApi } = require("../api/http-api");
 const { loadRecords } = require("../lib/record-manager");
