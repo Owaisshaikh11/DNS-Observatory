@@ -11,9 +11,9 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none bg-white font-mono text-[9.5px] text-ink/30 border border-ink/10 border-t-0">
         <div className="border border-dashed border-ink/20 p-6 flex flex-col items-center gap-3">
-          <span>[ PACKET INSPECTOR ]</span>
+          <span>[ PACKET VIEWER ]</span>
           <span className="max-w-[220px] leading-relaxed uppercase">
-            Select a resolver node from the delegation graph or waterfall list to inspect inbound telemetry packets.
+            Select a resolver node from the delegation graph or waterfall list to view its packet details.
           </span>
         </div>
       </div>
@@ -90,6 +90,36 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
                 .filter(Boolean)
                 .join(' + ')}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Parallel Queries Timing Breakdown */}
+      {hop.parallelQueries && hop.parallelQueries.length > 1 && (
+        <div className="border border-ink/20 p-2.5 bg-base/40 flex flex-col gap-2 flex-none">
+          <div className="font-mono text-[8px] text-ink/40 uppercase tracking-widest font-bold select-none">
+            ;; Parallel Queries Timing Breakdown
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {hop.parallelQueries.map((sub, sidx) => {
+              const maxLat = Math.max(...hop.parallelQueries.map(q => q.latencyMs), 1);
+              const pct = (sub.latencyMs / maxLat) * 100;
+              return (
+                <div key={sidx} className="grid grid-cols-[36px_1fr_40px_48px] gap-2 items-center font-mono text-[9px]">
+                  <div className="font-bold text-accent">{sub.type}</div>
+                  <div className="w-full h-2 bg-ink/5 border border-ink/10 relative overflow-hidden">
+                    <div 
+                      className="absolute top-0 bottom-0 left-0 bg-accent transition-all duration-300"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <div className="text-right font-medium text-ink/80">{sub.latencyMs}ms</div>
+                  <div className="text-right font-bold text-ink/45 text-[8.5px]">
+                    {sub.rcode === 'TIMEOUT' ? 'TIMEOUT' : `${sub.byteLength}B`}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

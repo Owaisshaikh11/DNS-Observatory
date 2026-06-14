@@ -57,13 +57,6 @@ const getValidationErrors = (val) => {
 export default function EntryPage() {
   const navigate = useNavigate();
 
-  // telemetry connection 
-  // const { connect } = useTelemetryStore();
-
-  // useEffect(() => {
-  //   connect();
-  // }, [connect]);
-
   const {
     startTrace,
     setDomain,
@@ -249,7 +242,7 @@ export default function EntryPage() {
         <div className="border-l border-ink/30 pl-3 ml-0.5 flex flex-col gap-1">
           <span>LOCAL RESOLVER: 127.0.0.1:5354</span>
           <span>API ENDPOINT: 127.0.0.1:4000</span>
-          <span>TELEMETRY: SOCKET.IO READY</span>
+          <span>PACKET ENGINE: READY</span>
         </div>
         <div className="mt-4 border-l border-accent/50 pl-3 ml-0.5 text-accent opacity-80 leading-relaxed">
           HINT: Try tracing <strong className="font-bold">"example.com"</strong> for a local resolution,<br />
@@ -424,7 +417,7 @@ export default function EntryPage() {
           >
             <h2 className="font-display font-black text-3xl md:text-5xl uppercase tracking-tighter">System<br />Architecture</h2>
             <p className="font-sans text-sm opacity-60 mt-6 max-w-md leading-relaxed">
-              The Observatory dissects standard resolution chains into granular data points, presented through a reactive spatial telemetry interface designed for precision network analysis.
+              The Observatory dissects standard resolution chains into granular data points, presented through a reactive spatial viewer interface designed for precision network analysis.
             </p>
           </motion.div>
 
@@ -465,9 +458,9 @@ export default function EntryPage() {
             />
             <BentoBox
               delay={0.3}
-              title="Packet Inspector"
+              title="Packet Viewer"
               text="Deep UDP/TCP raw packet decoding. Inspect opcodes, flags, and DNS headers natively within the trace interface."
-              icon="[ TELEMETRY ]"
+              icon="[ PACKET VIEWER ]"
               decoration={
                 <div className="flex flex-col gap-1 w-48 font-mono text-[9px] opacity-40 text-left p-2 border border-ink/10 bg-base/50">
                   <div className="border-b border-ink/10 pb-1 mb-1 text-accent font-bold">// DNS HEADER</div>

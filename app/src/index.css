@@ -65,39 +65,7 @@ body {
     display: none !important;
   }
 }
-/* Custom cursor styles */
-@media (hover: hover) {
-  * { cursor: none !important; }
-  .cursor-core { 
-    position: fixed; 
-    top: 0;
-    left: 0;
-    width: 4px; 
-    height: 4px; 
-    background: var(--ink); 
-    pointer-events: none; 
-    z-index: 9999; 
-  }
-  .cursor-frame { 
-    position: fixed; 
-    top: 0;
-    left: 0;
-    width: 28px; 
-    height: 28px; 
-    border: 1px solid var(--ink); 
-    pointer-events: none; 
-    z-index: 9998; 
-    transform: translate(-50%, -50%);
-    transition: width 0.15s ease-out, height 0.15s ease-out, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s, background-color 0.15s; 
-  }
-  .cursor-frame.hovering { 
-    width: 14px; 
-    height: 14px; 
-    border: 2px solid var(--accent); 
-    background: var(--accent); 
-    transform: translate(-50%, -50%) rotate(45deg);
-  }
-}
+
 
 /* Brutalist Custom Styles */
 .brutalist-navbar {

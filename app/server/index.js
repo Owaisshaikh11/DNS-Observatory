@@ -21,10 +21,8 @@ const path = require('path');
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
-const { Server: SocketIOServer } = require('socket.io');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
-const { connectTelemetry } = require('./telemetry-bridge');
 
 // Pull in the custom DNS server from the sibling directory
 const { startDnsUdpServer } = require('../../custom-dns-server/server/dns-server');
@@ -51,18 +49,12 @@ async function start() {
   const dnsServer = startDnsUdpServer(DNS_PORT);
   setInterval(cleanupExpiredSubdomains, 60_000);
 
-  // ── 2. Set up Express + Socket.io ──────────────────────────────────────────
+  // ── 2. Set up Express ──────────────────────────────────────────────────────
   const app = express();
   const httpServer = http.createServer(app);
-  const io = new SocketIOServer(httpServer, {
-    cors: { origin: CORS_ORIGINS, methods: ['GET', 'POST'] },
-  });
 
   app.use(cors({ origin: CORS_ORIGINS }));
   app.use(express.json());
-
-  // ── 3. Connect telemetry bridge ────────────────────────────────────────────
-  connectTelemetry(dnsServer, io);
 
   // ── API Routes ─────────────────────────────────────────────────────────────
 
@@ -130,13 +122,49 @@ async function start() {
     }
   });
 
-  // ── Socket.io connection logging ───────────────────────────────────────────
-  io.on('connection', (socket) => {
-    console.log(`[WS] Client connected: ${socket.id}`);
-    socket.on('disconnect', () => {
-      console.log(`[WS] Client disconnected: ${socket.id}`);
-    });
+  /**
+   * POST /api/dns/inject
+   * Body: { domain: string, type: string }
+   *
+   * Sends a raw UDP query to localhost:5354 to trigger telemetry collection.
+   */
+  app.post('/api/dns/inject', async (req, res) => {
+    const { domain, type = 'A' } = req.body || {};
+
+    if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
+      return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
+    }
+
+    const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA'];
+    const cleanType = String(type).toUpperCase().trim();
+    if (!allowedTypes.includes(cleanType)) {
+      return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
+    }
+
+    const { buildDnsQuery } = require('./dns-query-writer');
+    const dgram = require('dgram');
+    const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, MX: 15, TXT: 16, AAAA: 28 };
+    const typeNum = TYPE_NUMBERS[cleanType] || 1;
+
+    try {
+      const queryBuffer = buildDnsQuery(cleanDomain, typeNum, { recursionDesired: true });
+      const client = dgram.createSocket('udp4');
+      client.send(queryBuffer, 5354, '127.0.0.1', (err) => {
+        client.close();
+        if (err) {
+          console.error('[Packet Engine] Failed to inject mock query:', err.message);
+          return res.status(500).json({ error: `Failed to inject query: ${err.message}` });
+        }
+        res.json({ success: true, message: `Injected UDP query to port 5354 for ${cleanDomain} (${cleanType})` });
+      });
+    } catch (err) {
+      console.error('[Packet Engine] Injection build failed:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
+
+
 
   // ── Start listening ────────────────────────────────────────────────────────
   httpServer.listen(API_PORT, () => {

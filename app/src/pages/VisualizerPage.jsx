@@ -19,6 +19,9 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
 
     if (hop.type === 'CLIENT') {
       logLines.push({ time: timeStr, source: 'CLIENT', text: `Initiating trace query for "${hopDomain.toUpperCase()}" (Record Type: ${recTypeVal})` });
+      if (recTypeVal === 'ALL') {
+        logLines.push({ time: timeStr, source: 'RFC-8482', text: `Notice: ANY query deprecated by RFC 8482. Resolving types A, AAAA, MX, TXT, NS in parallel.` });
+      }
       logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Local Resolver at ${hop.ip}` });
     } else if (hop.type === 'LOCAL') {
       logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking local cache & zone databases...` });
@@ -218,6 +221,20 @@ export default function VisualizerPage() {
   const handleReset = () => {
     navigate('/');
   };
+
+  // ESC key handler to navigate back to home search page
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc' || e.keyCode === 27) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleReset();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleReset]);
+
 
   // Trigger alternate query type
   const handleAppendQuery = (type) => {
@@ -537,6 +554,13 @@ export default function VisualizerPage() {
             ↻ REPLAY
           </button>
 
+          <button
+            onClick={() => navigate(`/packet-viewer?q=${domain}&type=${recordType}`)}
+            className="px-3 py-0.5 border border-accent bg-base text-accent font-bold hover:bg-accent hover:text-[var(--base)] hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-150 cursor-pointer"
+          >
+            INSPECT PACKETS
+          </button>
+
           {/* Core Uplink Status */}
           <div className="flex items-center gap-2 w-20 justify-end select-none">
             <div className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
@@ -597,6 +621,25 @@ export default function VisualizerPage() {
 
               {playbackState === 'COMPLETE' || isNxDomain ? (
                 <div className="flex flex-col gap-5">
+                  {recordType === 'ALL' && (
+                    <div className="border border-ink p-3 bg-white font-mono text-[9.5px] relative overflow-hidden shadow-[2px_2px_0_0_#0D0D0D] border-l-4 border-l-accent">
+                      <div className="flex justify-between items-center border-b border-ink/10 pb-1 mb-1.5 font-bold text-accent select-none">
+                        <span>SYNTHETIC BATCH INFO</span>
+                        <a
+                          href="https://blog.cloudflare.com/rfc8482-saying-goodbye-to-any/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:underline flex items-center gap-0.5 cursor-pointer hover:text-ink transition-colors"
+                        >
+                          RFC 8482 ↗
+                        </a>
+                      </div>
+                      <p className="text-ink/75 leading-relaxed">
+                        In standard DNS, querying for "all" records at once (ANY type) is blocked to prevent DDoS attacks.
+                        To build this list, DNS Observatory automatically resolved A, AAAA, MX, TXT, and NS records in parallel.
+                      </p>
+                    </div>
+                  )}
 
                   {/* ANSWER SECTION */}
                   <div className="flex flex-col gap-2.5">
@@ -698,6 +741,7 @@ export default function VisualizerPage() {
                 onSelectHop={setSelectedHop}
                 activeStep={activeStep}
                 playbackState={playbackState}
+                recordType={recordType}
               />
             </div>
 
@@ -936,10 +980,10 @@ export default function VisualizerPage() {
           )}
 
           {isInspectorCollapsed ? (
-            /* Minimized Telemetry Packet Inspector strip */
+            /* Minimized Hop Details Inspector strip */
             <div className="h-[36px] flex-none border-t border-ink flex items-center justify-between px-4 bg-base/5 select-none">
               <span className="font-mono text-[9px] opacity-60 uppercase font-bold text-ink tracking-wider">
-                Telemetry Packet Inspector [COLLAPSED]
+                Hop Details Inspector [COLLAPSED]
               </span>
               <button
                 onClick={() => setIsInspectorCollapsed(false)}
@@ -949,15 +993,15 @@ export default function VisualizerPage() {
               </button>
             </div>
           ) : (
-            /* Bottom Half: Telemetry Packet Inspector */
+            /* Bottom Half: Hop Details Inspector */
             <div
               className={`flex flex-col overflow-hidden bg-white ${isWaterfallCollapsed ? 'flex-1 border-t-0' : ''
                 }`}
               style={!isWaterfallCollapsed ? { height: `${100 - waterfallHeight}%` } : undefined}
             >
               <div className="px-4 py-3 border-b border-ink/15 flex justify-between items-center select-none bg-base/5 flex-none">
-                <span className="font-mono text-[8px] opacity-40 uppercase tracking-widest font-bold text-ink">
-                  Telemetry Packet Inspector
+                <span className="font-mono text-[10.5px] opacity-75 uppercase tracking-widest font-bold text-ink">
+                  Hop Details Inspector
                 </span>
                 <div className="flex items-center gap-4">
                   <span className="font-mono text-[7.5px] text-accent font-bold">

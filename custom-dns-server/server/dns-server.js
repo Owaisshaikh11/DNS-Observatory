@@ -67,14 +67,14 @@ function startDnsUdpServer(port = 53) {
           // Decode response RCODE from raw DNS response header (byte index 2-3)
           const responseFlags = responseMsg.length >= 4 ? responseMsg.readUInt16BE(2) : 0;
           const rcode = responseFlags & 0x000f;
-          _emitQuery(dnsEvents, question, rinfo, rcode, startTime, false);
+          _emitQuery(dnsEvents, question, rinfo, rcode, startTime, false, msg, responseMsg);
         } else {
           console.warn(`Upstream resolution failed for ${question.name}. Sending SERVFAIL.`);
           const response = createResponse(query, [], 2); // RCODE 2 = SERVFAIL
           server.send(response, rinfo.port, rinfo.address, (sendErr) => {
             if (sendErr) console.error("Error sending SERVFAIL response:", sendErr);
           });
-          _emitQuery(dnsEvents, question, rinfo, 2, startTime, false);
+          _emitQuery(dnsEvents, question, rinfo, 2, startTime, false, msg, response);
         }
         return;
       }
@@ -88,7 +88,7 @@ function startDnsUdpServer(port = 53) {
         if (sendErr) console.error("Error sending DNS response:", sendErr);
       });
 
-      _emitQuery(dnsEvents, question, rinfo, rcode, startTime, true);
+      _emitQuery(dnsEvents, question, rinfo, rcode, startTime, isLocal, msg, response);
     } catch (err) {
       console.error("Error resolving DNS query:", err);
       try {
@@ -107,7 +107,7 @@ function startDnsUdpServer(port = 53) {
 }
 
 // Helper — builds and emits the telemetry event without cluttering the handler
-function _emitQuery(emitter, question, rinfo, rcode, startTime, isLocal) {
+function _emitQuery(emitter, question, rinfo, rcode, startTime, isLocal, queryBuffer, responseBuffer) {
   emitter.emit("query", {
     domain: question.name,
     type: question.type,
@@ -116,6 +116,8 @@ function _emitQuery(emitter, question, rinfo, rcode, startTime, isLocal) {
     responseCode: rcode,
     timestamp: Date.now(),
     latencyMs: Date.now() - startTime,
+    queryBuffer,
+    responseBuffer,
   });
 }
 

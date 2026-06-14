@@ -38,7 +38,7 @@ const getLatencyColor = (latencyMs) => {
   return '#EF4444'; // red
 };
 
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState }) {
+export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, recordType }) {
   const columns = hops?.length || 1;
   const W = Math.max(850, columns * 240);
   const H = 280;
@@ -75,6 +75,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [activeTooltip, setActiveTooltip] = useState(null); // { edge, toNode, x, y }
+  const [hoveredParallelEdge, setHoveredParallelEdge] = useState(null); // edgeKey on hover
 
   const defaultScale = columns > 5 ? Math.max(0.4, 5 / columns) : 1;
 
@@ -266,6 +267,155 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
             const dotColor = strokeColor;
 
             const isHovered = activeTooltip?.edge === edge;
+            const isParallelEdge = toNode.queriedTypes && toNode.queriedTypes.length > 1;
+
+            if (isParallelEdge) {
+              const queryTypes = toNode.queriedTypes;
+              const N = queryTypes.length;
+              const spacing = 7;
+              const offsets = Array.from({ length: N }, (_, idx) => (idx - (N - 1) / 2) * spacing);
+              const edgeKey = `${edge.from}-${edge.to}`;
+              const isParallelHovered = hoveredParallelEdge === edgeKey;
+              const centerIdx = Math.floor(N / 2);
+
+              return (
+                <g key={i}>
+                  {/* Inline Definitions for text paths */}
+                  <defs>
+                    {offsets.map((offset, idx) => {
+                      const startY = fc.y + offset;
+                      const endY = tc.y + offset;
+                      const cp1x = fc.x + (tc.x - fc.x) / 2;
+                      const cp1y = startY;
+                      const cp2x = fc.x + (tc.x - fc.x) / 2;
+                      const cp2y = endY;
+                      return (
+                        <path
+                          key={idx}
+                          id={`tpath-${edgeKey}-${idx}`}
+                          d={`M ${fc.x} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${endY}`}
+                        />
+                      );
+                    })}
+                  </defs>
+
+                  {/* Render the visual dashed curves */}
+                  {offsets.map((offset, idx) => {
+                    const qType = queryTypes[idx];
+                    const startY = fc.y + offset;
+                    const endY = tc.y + offset;
+                    const cp1x = fc.x + (tc.x - fc.x) / 2;
+                    const cp1y = startY;
+                    const cp2x = fc.x + (tc.x - fc.x) / 2;
+                    const cp2y = endY;
+                    const pathD = `M ${fc.x} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${endY}`;
+
+                    const isLineHovered = activeTooltip?.edge === edge || isParallelHovered;
+
+                    return (
+                      <g key={qType}>
+                        {isActive && isLineHovered && (
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke={strokeColor}
+                            strokeWidth={4}
+                            className="opacity-15"
+                            style={{ transition: 'stroke-dasharray 0.2s' }}
+                          />
+                        )}
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={strokeColor}
+                          strokeWidth={isActive ? 1.2 : 0.8}
+                          strokeDasharray={isActive ? '4 2' : '2 2'}
+                          className={isActive ? 'arrow-path' : ''}
+                          style={{ transition: 'stroke-width 0.2s, stroke 0.4s' }}
+                        />
+                        {isAnimating && (
+                          <circle r="2" fill={strokeColor}>
+                            <animateMotion dur={`${1.0 + idx * 0.15}s`} repeatCount="indefinite" path={pathD} />
+                            <animate attributeName="r" values="1.5;3;1.5" dur="0.8s" repeatCount="indefinite" />
+                          </circle>
+                        )}
+                      </g>
+                    );
+                  })}
+
+                  {/* Render the main 'N Parallel Queries' label on the center path (when not hovered) */}
+                  {!isParallelHovered && (
+                    <text
+                      fontFamily="JetBrains Mono"
+                      fontSize="8px"
+                      fontWeight="bold"
+                      fill={isActive ? strokeColor : 'rgba(13,13,13,0.3)'}
+                      dy="-4.5"
+                      className="select-none pointer-events-none uppercase tracking-widest transition-opacity duration-200"
+                      style={{
+                        textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
+                      }}
+                    >
+                      <textPath href={`#tpath-${edgeKey}-${centerIdx}`} startOffset="50%" textAnchor="middle">
+                        {`── ${N} Parallel Queries ──`}
+                      </textPath>
+                    </text>
+                  )}
+
+                  {/* Render individual type labels on ALL paths (when hovered) */}
+                  {isParallelHovered && queryTypes.map((qType, idx) => {
+                    const subColor = isActive ? strokeColor : 'rgba(13,13,13,0.1)';
+                    const offset = offsets[idx];
+                    return (
+                      <text
+                        key={idx}
+                        x={midX}
+                        y={midY + offset}
+                        fontFamily="JetBrains Mono"
+                        fontSize="7.5px"
+                        fontWeight="black"
+                        fill={subColor}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        className="select-none pointer-events-none transition-opacity duration-200"
+                        style={{
+                          textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
+                        }}
+                      >
+                        {qType}
+                      </text>
+                    );
+                  })}
+
+                  {/* Hover detector overlay - wide transparent path for easy triggering */}
+                  {isActive && (
+                    <path
+                      d={`M ${fc.x} ${fc.y} C ${fc.x + (tc.x - fc.x) / 2} ${fc.y}, ${fc.x + (tc.x - fc.x) / 2} ${tc.y}, ${tc.x} ${tc.y}`}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={30}
+                      className="cursor-pointer interactive"
+                      onMouseEnter={() => {
+                        setHoveredParallelEdge(edgeKey);
+                        const slopesDown = fromNode.treeY < toNode.treeY;
+                        let tooltipY = slopesDown ? midY + 50 : midY - 150;
+                        tooltipY = Math.max(5, Math.min(tooltipY, H - 110));
+                        setActiveTooltip({
+                          edge,
+                          toNode,
+                          x: midX,
+                          y: tooltipY,
+                        });
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredParallelEdge(null);
+                        setActiveTooltip(null);
+                      }}
+                    />
+                  )}
+                </g>
+              );
+            }
 
             return (
               <g key={i}>
@@ -300,7 +450,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                   fill={isActive ? strokeColor : 'rgba(13,13,13,0.2)'}
                   className="font-mono text-[10px] font-bold select-none pointer-events-none transition-all duration-200"
                   style={{
-                    textShadow: '1.5px 1.5px 0 var(--color-base), -1.5px 1.5px 0 var(--color-base), 1.5px -1.5px 0 var(--color-base), -1.5px -1.5px 0 var(--color-base)',
+                    textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
                   }}
                 >
                   {simplifyLabel(edge.label)}
@@ -319,7 +469,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                         edge,
                         toNode,
                         x: midX,
-                        y: midY,
+                        y: midY - 85,
                       });
                     }}
                     onMouseLeave={() => {
@@ -442,7 +592,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
           {activeTooltip && activeTooltip.toNode.type !== 'CLIENT' && activeTooltip.toNode.type !== 'CNAME_REDIRECT' && (
             <foreignObject
               x={activeTooltip.x - 100}
-              y={activeTooltip.y - 85}
+              y={activeTooltip.y}
               width="200"
               height="80"
               className="pointer-events-none z-50 overflow-visible"

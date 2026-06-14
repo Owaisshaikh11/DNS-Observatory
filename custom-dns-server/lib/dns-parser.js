@@ -49,22 +49,31 @@ function parseDomainName(buffer, offset) {
   return [labels.join("."), jumped ? jumpOffset : pointer];
 }
 
-// Takes The raw UDP packet and decodes it into a usable JS object
+// Takes the raw UDP packet and decodes it into a usable JS object
 function parseQuery(buffer) {
   if (buffer.length < 12) {
     throw new Error("DNS packet parsing error: Header truncated");
   }
 
   let offset = 0;
-  const header = {
-    id: buffer.readUInt16BE(offset),
-    flags: buffer.readUInt16BE(offset + 2),
-    qdcount: buffer.readUInt16BE(offset + 4),
-  };
+  const id = buffer.readUInt16BE(offset);
+  const rawFlags = buffer.readUInt16BE(offset + 2);
+  const qdcount = buffer.readUInt16BE(offset + 4);
+  const ancount = buffer.readUInt16BE(offset + 6);
+  const nscount = buffer.readUInt16BE(offset + 8);
+  const arcount = buffer.readUInt16BE(offset + 10);
   offset += 12;
 
+  const rcode = rawFlags & 0x000f;
+  const opcode = (rawFlags & 0x7800) >> 11;
+
+  const TYPE_NAMES = {
+    1: 'A', 2: 'NS', 5: 'CNAME', 6: 'SOA', 15: 'MX', 16: 'TXT', 28: 'AAAA'
+  };
+
   const questions = [];
-  for (let i = 0; i < header.qdcount; i++) {
+  for (let i = 0; i < qdcount; i++) {
+    const startOffset = offset;
     const [name, newOffset] = parseDomainName(buffer, offset);
     offset = newOffset;
     if (offset + 4 > buffer.length) {
@@ -74,10 +83,42 @@ function parseQuery(buffer) {
     offset += 2;
     const cls = buffer.readUInt16BE(offset);
     offset += 2;
-    questions.push({ name, type, class: cls });
+    questions.push({ 
+      name, 
+      type, 
+      typeName: TYPE_NAMES[type] || `TYPE${type}`, 
+      class: cls,
+      startOffset,
+      endOffset: offset
+    });
   }
 
-  return { header, questions };
+  // Parse flags array
+  const flags = [];
+  if (rawFlags & 0x8000) flags.push('QR');
+  if (rawFlags & 0x0400) flags.push('AA');
+  if (rawFlags & 0x0200) flags.push('TC');
+  if (rawFlags & 0x0100) flags.push('RD');
+  if (rawFlags & 0x0080) flags.push('RA');
+  if (rawFlags & 0x0020) flags.push('AD');
+  if (rawFlags & 0x0010) flags.push('CD');
+
+  const rawHex = [...buffer].map(b => b.toString(16).padStart(2, '0')).join(' ');
+
+  return {
+    header: { id, flags: rawFlags, qdcount }, // keep original backward compatibility support
+    id,
+    flags,
+    rawFlags,
+    opcode,
+    rcode,
+    qdcount,
+    ancount,
+    nscount,
+    arcount,
+    questions,
+    rawHex
+  };
 }
 
 function createResponse(query, answers = [], rcode = 0) {

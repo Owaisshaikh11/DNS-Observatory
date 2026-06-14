@@ -22,6 +22,7 @@
 const dgram = require('dgram');
 const { buildDnsQuery } = require('./dns-query-writer');
 const { parseDnsResponse } = require('./dns-response-parser');
+const { parseQuery } = require('../../custom-dns-server/lib/dns-parser');
 const { lookupGeoIp } = require('./geoip-service');
 const ROOT_SERVERS = require('./root-hints');
 
@@ -100,7 +101,7 @@ function sendUdpQuery(ip, port, queryBuffer, timeoutMs = 3000) {
  * @param {string} domain  - Domain name to look up
  * @param {number} typeNum - Record type number
  * @param {object} opts    - { recursionDesired, dnssecOk, timeoutMs }
- * @returns {Promise<{parsed, latencyMs}>}
+ * @returns {Promise<{parsed, latencyMs, byteLength, queryHex, queryPacket}>}
  */
 async function performHop(ip, port, domain, typeNum, opts = {}) {
   const query = buildDnsQuery(domain, typeNum, {
@@ -108,12 +109,21 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
     dnssecOk:         opts.dnssecOk !== false, // default true for DNSSEC visibility
   });
 
+  const queryHex = [...query].map(b => b.toString(16).padStart(2, '0')).join(' ');
+  let queryPacket = null;
+  try {
+    queryPacket = parseQuery(query);
+    queryPacket.rawHex = queryHex;
+  } catch (err) {
+    console.error(`[Iterative] Failed to parse request query buffer:`, err.message);
+  }
+
   const start = Date.now();
   const rawResponse = await sendUdpQuery(ip, port, query, opts.timeoutMs || 3000);
   const latencyMs = Date.now() - start;
 
   const parsed = parseDnsResponse(rawResponse);
-  return { parsed, latencyMs, byteLength: rawResponse.length };
+  return { parsed, latencyMs, byteLength: rawResponse.length, queryHex, queryPacket };
 }
 
 // ── Referral Extraction ────────────────────────────────────────────────────
@@ -175,7 +185,7 @@ async function resolveNsHostname(nsHostname) {
  * Builds a structured hop object from the result of a DNS query.
  * This is the shape that the frontend's HopCard component consumes.
  */
-function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain }) {
+function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain, queriedTypes, parallelQueries, queryPacket }) {
   return {
     id,
     step,
@@ -189,9 +199,19 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
     description,                         // what happened here, in plain English
     geo,                                 // { flag, org, country, city, countryCode }
     queryDomain: queryDomain || null,
+    queriedTypes: queriedTypes || (parsed?.typeName ? [parsed.typeName] : ['A']),
+    parallelQueries: parallelQueries || null,
+    queryPacket: queryPacket || null,
     response: parsed ? {
-      rcode:      parsed.rcode,
+      id:         parsed.id,
+      rawFlags:   parsed.rawFlags,
       flags:      parsed.flags,
+      qdcount:    parsed.qdcount,
+      ancount:    parsed.ancount,
+      nscount:    parsed.nscount,
+      arcount:    parsed.arcount,
+      questions:  parsed.questions,
+      rcode:      parsed.rcode,
       answers:    parsed.answers,
       authority:  parsed.authority,
       additional: parsed.additional,
@@ -265,6 +285,8 @@ async function iterativeTrace(domain, recordType = 'A') {
       description: isFirst
         ? `Initiating iterative trace for ${currentDomain} [TYPE: ${recordType.toUpperCase()}]. Querying local custom DNS server first.`
         : `CNAME target resolution: initiating query for ${currentDomain} [TYPE: ${recordType.toUpperCase()}].`,
+      queriedTypes: [recordType.toUpperCase()],
+      parallelQueries: null,
     }));
 
     if (!isFirst) {
@@ -281,9 +303,10 @@ async function iterativeTrace(domain, recordType = 'A') {
     let localParsed = null;
     let localLatency = 0;
     let localByteLength = 0;
+    let localParallelQueries = [];
 
     try {
-      const { parsed, latencyMs, byteLength } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
+      const { parsed, latencyMs, byteLength, queryPacket } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
         recursionDesired: true,
         dnssecOk: false,
       });
@@ -296,17 +319,62 @@ async function iterativeTrace(domain, recordType = 'A') {
 
       // If local hit and recordType is 'ALL', query local DNS server for extra records (AAAA, MX, TXT, NS)
       if (isLocalHit && recordType.toUpperCase() === 'ALL') {
+        localParallelQueries.push({
+          type: 'A',
+          latencyMs: latencyMs,
+          byteLength: byteLength,
+          rcode: parsed.rcode,
+          queryPacket,
+          responsePacket: parsed,
+        });
+
         const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
         const extraResults = await Promise.allSettled(
           extraTypes.map(t => performHop('127.0.0.1', 5354, currentDomain, TYPE_NUMBERS[t], { recursionDesired: true, dnssecOk: false }))
         );
-        for (const res of extraResults) {
+
+        extraTypes.forEach((t, idx) => {
+          const res = extraResults[idx];
           if (res.status === 'fulfilled') {
-            localParsed.answers.push(...res.value.parsed.answers);
-            localLatency = Math.max(localLatency, res.value.latencyMs);
-            localByteLength += res.value.byteLength;
+            const val = res.value;
+            localParsed.answers.push(...val.parsed.answers);
+            localByteLength += val.byteLength;
+            localParallelQueries.push({
+              type: t,
+              latencyMs: val.latencyMs,
+              byteLength: val.byteLength,
+              rcode: val.parsed.rcode,
+              queryPacket: val.queryPacket,
+              responsePacket: val.parsed,
+            });
+          } else {
+            localParallelQueries.push({
+              type: t,
+              latencyMs: 0,
+              byteLength: 0,
+              rcode: 'TIMEOUT',
+              error: res.reason.message,
+              queryPacket: null,
+              responsePacket: null,
+            });
           }
-        }
+        });
+
+        // Compute localLatency as the maximum RTT of all parallel queries
+        const latencies = localParallelQueries.map(q => q.latencyMs);
+        localLatency = Math.max(...latencies);
+
+        // Adjust cumulative RTT to reflect maximum latency of parallel requests
+        cumulative = cumulative - latencyMs + localLatency;
+      } else {
+        localParallelQueries = [{
+          type: recordType.toUpperCase(),
+          latencyMs: localLatency,
+          byteLength: localByteLength,
+          rcode: localParsed ? localParsed.rcode : 'UNKNOWN',
+          queryPacket,
+          responsePacket: localParsed,
+        }];
       }
 
       const localDescription = isLocalHit
@@ -328,6 +396,9 @@ async function iterativeTrace(domain, recordType = 'A') {
         queryDomain: currentDomain,
         description: localDescription,
         byteLength: localByteLength,
+        queriedTypes: isLocalHit && recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
+        parallelQueries: localParallelQueries,
+        queryPacket,
       }));
       edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
 
@@ -368,6 +439,8 @@ async function iterativeTrace(domain, recordType = 'A') {
         queryDomain: currentDomain,
         description: `Local custom DNS served authoritative mapping directly.`,
         byteLength: localByteLength,
+        queriedTypes: recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
+        parallelQueries: localParallelQueries,
       }));
 
       finalParsed = localParsed;
@@ -398,6 +471,8 @@ async function iterativeTrace(domain, recordType = 'A') {
             response: null,
             treeX: 0,
             treeY: 55,
+            queriedTypes: [recordType.toUpperCase()],
+            parallelQueries: null,
           });
           edges.push({ from: authHopId, to: cnameNodeId, label: 'CNAME Alias' });
 
@@ -411,9 +486,9 @@ async function iterativeTrace(domain, recordType = 'A') {
 
     // 3. ROOT Hop
     const rootServer = ROOT_SERVERS[Math.floor(Math.random() * ROOT_SERVERS.length)];
-    let rootParsed, rootLatency, rootByteLength;
+    let rootParsed, rootLatency, rootByteLength, rootQueryHex, rootQueryPacket;
     try {
-      ({ parsed: rootParsed, latencyMs: rootLatency, byteLength: rootByteLength } = await performHop(
+      ({ parsed: rootParsed, latencyMs: rootLatency, byteLength: rootByteLength, queryHex: rootQueryHex, queryPacket: rootQueryPacket } = await performHop(
         rootServer.ipv4, 53, currentDomain, typeNum, { dnssecOk: true }
       ));
     } catch (err) {
@@ -423,6 +498,15 @@ async function iterativeTrace(domain, recordType = 'A') {
     cumulative += rootLatency;
     const rootGeo = await lookupGeoIp(rootServer.ipv4);
     if (rootParsed.dnssecPresent) dnssecPresent = true;
+
+    const rootParallelQueries = [{
+      type: recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase(),
+      latencyMs: rootLatency,
+      byteLength: rootByteLength,
+      rcode: rootParsed.rcode,
+      queryPacket: rootQueryPacket,
+      responsePacket: rootParsed,
+    }];
 
     if (rootParsed.rcodeNum === 3) {
       hops.push(buildHop({
@@ -434,6 +518,9 @@ async function iterativeTrace(domain, recordType = 'A') {
         queryDomain: currentDomain,
         description: `Root server ${rootServer.name} returned NXDOMAIN. ${currentDomain} does not exist at root level.`,
         byteLength: rootByteLength,
+        queriedTypes: [recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase()],
+        parallelQueries: rootParallelQueries,
+        queryPacket: rootQueryPacket,
       }));
       edges.push({ from: localHopId, to: rootHopId, label: 'Iterative (RD=0)' });
       finalParsed = rootParsed;
@@ -466,13 +553,16 @@ async function iterativeTrace(domain, recordType = 'A') {
       queryDomain: currentDomain,
       description: `Root server ${rootServer.name} responded with a referral to the .${tldZone} TLD nameservers.`,
       byteLength: rootByteLength,
+      queriedTypes: [recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase()],
+      parallelQueries: rootParallelQueries,
+      queryPacket: rootQueryPacket,
     }));
     edges.push({ from: localHopId, to: rootHopId, label: 'Iterative (RD=0)' });
 
     // 4. TLD Hop
-    let tldParsed, tldLatency, tldByteLength;
+    let tldParsed, tldLatency, tldByteLength, tldQueryHex, tldQueryPacket;
     try {
-      ({ parsed: tldParsed, latencyMs: tldLatency, byteLength: tldByteLength } = await performHop(
+      ({ parsed: tldParsed, latencyMs: tldLatency, byteLength: tldByteLength, queryHex: tldQueryHex, queryPacket: tldQueryPacket } = await performHop(
         tldRef.ip, 53, currentDomain, typeNum, { dnssecOk: true }
       ));
     } catch (err) {
@@ -482,6 +572,15 @@ async function iterativeTrace(domain, recordType = 'A') {
     cumulative += tldLatency;
     const tldGeo = await lookupGeoIp(tldRef.ip);
     if (tldParsed.dnssecPresent) dnssecPresent = true;
+
+    const tldParallelQueries = [{
+      type: recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase(),
+      latencyMs: tldLatency,
+      byteLength: tldByteLength,
+      rcode: tldParsed.rcode,
+      queryPacket: tldQueryPacket,
+      responsePacket: tldParsed,
+    }];
 
     if (tldParsed.rcodeNum === 3) {
       hops.push(buildHop({
@@ -493,6 +592,9 @@ async function iterativeTrace(domain, recordType = 'A') {
         queryDomain: currentDomain,
         description: `TLD server returned NXDOMAIN. ${currentDomain} is not registered in .${tldZone}.`,
         byteLength: tldByteLength,
+        queriedTypes: [recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase()],
+        parallelQueries: tldParallelQueries,
+        queryPacket: tldQueryPacket,
       }));
       edges.push({ from: rootHopId, to: tldHopId, label: `NS .${tldZone} → ${tldRef.nsName}` });
       finalParsed = tldParsed;
@@ -525,17 +627,92 @@ async function iterativeTrace(domain, recordType = 'A') {
       queryDomain: currentDomain,
       description: `TLD server ${tldRef.nsName} responded with a referral to the ${authZoneVal} authoritative nameservers.`,
       byteLength: tldByteLength,
+      queriedTypes: [recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase()],
+      parallelQueries: tldParallelQueries,
+      queryPacket: tldQueryPacket,
     }));
     edges.push({ from: rootHopId, to: tldHopId, label: `NS .${tldZone} → ${tldRef.nsName}` });
 
     // 5. AUTH Hop
-    let authParsed, authLatency, authByteLength;
-    try {
-      ({ parsed: authParsed, latencyMs: authLatency, byteLength: authByteLength } = await performHop(
-        authRef.ip, 53, currentDomain, typeNum, { dnssecOk: true }
-      ));
-    } catch (err) {
-      throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) timed out: ${err.message}`, { cause: err });
+    let authParsed = null;
+    let authLatency = 0;
+    let authByteLength = 0;
+    let parallelQueries = [];
+    let combinedAnswers = [];
+
+    const isAllQuery = recordType.toUpperCase() === 'ALL';
+
+    if (isAllQuery) {
+      const typesToQuery = ['A', 'AAAA', 'MX', 'TXT', 'NS'];
+      const results = await Promise.allSettled(
+        typesToQuery.map(t => performHop(authRef.ip, 53, currentDomain, TYPE_NUMBERS[t], { dnssecOk: t === 'A' }))
+      );
+
+      typesToQuery.forEach((t, idx) => {
+        const res = results[idx];
+        if (res.status === 'fulfilled') {
+          const val = res.value;
+          parallelQueries.push({
+            type: t,
+            latencyMs: val.latencyMs,
+            byteLength: val.byteLength,
+            rcode: val.parsed.rcode,
+            queryPacket: val.queryPacket,
+            responsePacket: val.parsed,
+          });
+          combinedAnswers.push(...val.parsed.answers);
+
+          if (t === 'A') {
+            authParsed = val.parsed;
+            authByteLength = val.byteLength;
+          } else {
+            authByteLength += val.byteLength;
+          }
+        } else {
+          parallelQueries.push({
+            type: t,
+            latencyMs: 0,
+            byteLength: 0,
+            rcode: 'TIMEOUT',
+            error: res.reason.message,
+            queryPacket: null,
+            responsePacket: null,
+          });
+        }
+      });
+
+      if (!authParsed) {
+        const successful = results.find(r => r.status === 'fulfilled');
+        if (successful) {
+          authParsed = successful.value.parsed;
+        } else {
+          throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) parallel queries timed out.`);
+        }
+      }
+
+      authParsed.answers = combinedAnswers;
+      const latencies = parallelQueries.map(q => q.latencyMs);
+      authLatency = Math.max(...latencies);
+
+    } else {
+      try {
+        const { parsed, latencyMs, byteLength, queryPacket } = await performHop(
+          authRef.ip, 53, currentDomain, typeNum, { dnssecOk: true }
+        );
+        authParsed = parsed;
+        authLatency = latencyMs;
+        authByteLength = byteLength;
+        parallelQueries = [{
+          type: recordType.toUpperCase(),
+          latencyMs,
+          byteLength,
+          rcode: parsed.rcode,
+          queryPacket,
+          responsePacket: parsed,
+        }];
+      } catch (err) {
+        throw new Error(`Authoritative server ${authRef.nsName} (${authRef.ip}) timed out: ${err.message}`, { cause: err });
+      }
     }
 
     cumulative += authLatency;
@@ -546,21 +723,7 @@ async function iterativeTrace(domain, recordType = 'A') {
       authNs = authRef.nsName;
     }
 
-    let extraAnswers = [];
-    if (recordType.toUpperCase() === 'ALL') {
-      const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
-      const results = await Promise.allSettled(
-        extraTypes.map(t => performHop(authRef.ip, 53, currentDomain, TYPE_NUMBERS[t], { dnssecOk: false }))
-      );
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          extraAnswers.push(...result.value.parsed.answers);
-        }
-      }
-    }
-
-    const finalAnswers = [...authParsed.answers, ...extraAnswers];
-    authParsed.answers = finalAnswers;
+    const finalAnswers = authParsed.answers;
     finalParsed = authParsed;
 
     let authDescription;
@@ -569,7 +732,7 @@ async function iterativeTrace(domain, recordType = 'A') {
     } else if (finalAnswers.length > 0) {
       const first = finalAnswers[0];
       const valueStr = typeof first.value === 'string' ? first.value : JSON.stringify(first.value);
-      authDescription = `Authoritative server ${authRef.nsName} returned final answer. ${first.typeName} record: ${valueStr}.${extraAnswers.length > 0 ? ` Plus ${extraAnswers.length} extra records for ALL.` : ''}`;
+      authDescription = `Authoritative server ${authRef.nsName} returned final answer. ${first.typeName} record: ${valueStr}.${isAllQuery ? ` Plus ${finalAnswers.length - 1} extra records resolved in parallel.` : ''}`;
     } else {
       authDescription = `Authoritative server ${authRef.nsName} responded but returned no ${recordType.toUpperCase()} records for ${currentDomain}.`;
     }
@@ -583,6 +746,9 @@ async function iterativeTrace(domain, recordType = 'A') {
       queryDomain: currentDomain,
       description: authDescription,
       byteLength: authByteLength,
+      queriedTypes: isAllQuery ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
+      parallelQueries,
+      queryPacket: parallelQueries[0]?.queryPacket || null,
     }));
     edges.push({ from: tldHopId, to: authHopId, label: `NS ${authZoneVal} → ${authRef.nsName}` });
 
@@ -612,6 +778,8 @@ async function iterativeTrace(domain, recordType = 'A') {
           response: null,
           treeX: 0,
           treeY: 55,
+          queriedTypes: [recordType.toUpperCase()],
+          parallelQueries: null,
         });
         edges.push({ from: authHopId, to: cnameNodeId, label: 'CNAME Alias' });
 
