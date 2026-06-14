@@ -3,13 +3,15 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTraceStore } from '../stores/useTraceStore';
 import { usePacketStore } from '../stores/usePacketStore';
+import { exportHopPcap, exportTracePcap } from '../utils/pcapExporter';
 import FlagBadge from '../components/FlagBadge';
 import {
   Activity,
   Terminal,
   Info,
   ChevronRight,
-  Monitor
+  Monitor,
+  Download
 } from 'lucide-react';
 
 export default function PacketViewerPage() {
@@ -29,6 +31,49 @@ export default function PacketViewerPage() {
     setSelectedHopId,
   } = usePacketStore();
 
+  // 1. State Declarations
+  const [activeTab, setActiveTab] = useState('RESPONSE'); // 'REQUEST' or 'RESPONSE'
+  const [hoveredRange, setHoveredRange] = useState(null); // { start: number, end: number }
+  const [activeParallelType, setActiveParallelType] = useState(null); // Selected parallel query type (A, AAAA, MX, etc.)
+  const [isDownloadOpen, setIsDownloadOpen] = useState(false);
+  const [openNodes, setOpenNodes] = useState({
+    header: true,
+    questions: true,
+    answers: true,
+    authority: true,
+    additional: true
+  });
+
+  // 2. Refs
+  const downloadRef = useRef(null);
+  const hexViewerContainerRef = useRef(null);
+
+  // 3. Computed Variables
+  const hops = traceData?.hops || [];
+  const currentHop = hops.find(h => h.id === selectedHopId) || hops[0];
+  const isVirtualHop = currentHop?.type === 'CLIENT' || currentHop?.type === 'CNAME_REDIRECT';
+  const hasMultipleParallel = currentHop?.parallelQueries && currentHop.parallelQueries.length > 1;
+
+  // 4. Handlers
+  const handleDownloadHopPcap = () => {
+    if (currentHop) {
+      exportHopPcap(currentHop, traceData?.timestamp);
+    }
+    setIsDownloadOpen(false);
+  };
+
+  const handleDownloadTracePcap = () => {
+    if (hops && hops.length > 0) {
+      exportTracePcap(hops, traceData?.timestamp, qParam || domain || 'dns-trace');
+    }
+    setIsDownloadOpen(false);
+  };
+
+  const toggleNode = (node) => {
+    setOpenNodes(prev => ({ ...prev, [node]: !prev[node] }));
+  };
+
+  // 5. Side Effects (useEffects)
   // Reload trace data if query params are present but store is empty (e.g. page refresh)
   useEffect(() => {
     if (qParam && (!traceData || domain !== qParam)) {
@@ -53,25 +98,27 @@ export default function PacketViewerPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [navigate, qParam, domain, typeParam, recordType]);
 
+  // Click outside download dropdown handler
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (downloadRef.current && !downloadRef.current.contains(event.target)) {
+        setIsDownloadOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-  const [activeTab, setActiveTab] = useState('RESPONSE'); // 'REQUEST' or 'RESPONSE'
-  const [hoveredRange, setHoveredRange] = useState(null); // { start: number, end: number }
-  const [activeParallelType, setActiveParallelType] = useState(null); // Selected parallel query type (A, AAAA, MX, etc.)
-
-  // Accordion open states
-  const [openNodes, setOpenNodes] = useState({
-    header: true,
-    questions: true,
-    answers: true,
-    authority: true,
-    additional: true
-  });
-
-  const toggleNode = (node) => {
-    setOpenNodes(prev => ({ ...prev, [node]: !prev[node] }));
-  };
-
-  const hops = traceData?.hops || [];
+  // Smoothly auto-scroll highlighted row in Hex grid into view
+  useEffect(() => {
+    if (hoveredRange && hexViewerContainerRef.current) {
+      const rowIdx = Math.floor(hoveredRange.start / 16);
+      const rowEl = hexViewerContainerRef.current.querySelector(`[data-row-index="${rowIdx}"]`);
+      if (rowEl) {
+        rowEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [hoveredRange]);
 
   // Set default selected hop on load/update
   useEffect(() => {
@@ -81,10 +128,6 @@ export default function PacketViewerPage() {
       setSelectedHopId(defaultHop.id);
     }
   }, [hops, selectedHopId, setSelectedHopId]);
-
-  const currentHop = hops.find(h => h.id === selectedHopId) || hops[0];
-
-  const hasMultipleParallel = currentHop?.parallelQueries && currentHop.parallelQueries.length > 1;
 
   // Reset active parallel type when selected hop changes
   useEffect(() => {
@@ -144,7 +187,7 @@ export default function PacketViewerPage() {
     }
 
     return (
-      <div className="bg-ink p-4 font-mono text-[10.5px] text-[#F0EDE8] overflow-x-auto border border-ink/40 h-full scrollbar-thin select-text">
+      <div ref={hexViewerContainerRef} className="bg-ink p-4 font-mono text-[10.5px] text-[#F0EDE8] overflow-x-auto border border-ink/40 h-full scrollbar-thin select-text">
         <div className="text-[10px] text-accent font-bold uppercase tracking-wider mb-3 select-none flex justify-between">
           <span>Packet Byte Grid // {bytes.length} bytes captured</span>
           {hoveredRange && (
@@ -157,7 +200,7 @@ export default function PacketViewerPage() {
           {rows.map((row, ri) => {
             const offset = (ri * 16).toString(16).padStart(4, '0').toUpperCase();
             return (
-              <div key={ri} className="flex gap-6 items-center leading-normal">
+              <div key={ri} data-row-index={ri} className="flex gap-6 items-center leading-normal">
                 {/* Offset column */}
                 <span className="text-[#66D9EF]/45 select-none w-10 font-bold">{offset}</span>
 
@@ -190,7 +233,7 @@ export default function PacketViewerPage() {
                 </span>
 
                 {/* ASCII Column */}
-                <span className="text-[#A6E22E]/40 font-semibold tracking-wider select-none w-24 text-right">
+                <span className="text-[#A6E22E]/65 font-semibold tracking-wider select-none w-24 text-right">
                   {row.map((b, bi) => {
                     const globalIdx = ri * 16 + bi;
                     const isHovered = hoveredRange && globalIdx >= hoveredRange.start && globalIdx < hoveredRange.end;
@@ -228,8 +271,6 @@ export default function PacketViewerPage() {
     );
   };
 
-  const isVirtualHop = currentHop?.type === 'CLIENT' || currentHop?.type === 'CNAME_REDIRECT';
-
   return (
     <div className="w-full h-full flex flex-col text-ink bg-base overflow-hidden selection:bg-accent selection:text-[var(--base)]">
 
@@ -249,7 +290,43 @@ export default function PacketViewerPage() {
           </span>
         </div>
 
-        {/* <div className="flex items-center gap-6" /> */}
+        <div className="relative font-mono text-[11px] select-none" ref={downloadRef}>
+          <button
+            onClick={() => setIsDownloadOpen(!isDownloadOpen)}
+            className="brutalist-select-trigger h-7 px-3 py-0 flex items-center gap-1.5 text-[10px] font-bold uppercase cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-accent" />
+            <span>Export PCAP</span>
+            <span className={`text-[8px] transition-transform duration-200 ${isDownloadOpen ? 'rotate-180' : ''}`}>▼</span>
+          </button>
+
+          <AnimatePresence>
+            {isDownloadOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                transition={{ duration: 0.12 }}
+                className="absolute right-0 top-[calc(100%+4px)] w-[190px] brutalist-select-dropdown flex flex-col z-50 shadow-[3px_3px_0_0_#0D0D0D] border border-ink"
+              >
+                <button
+                  disabled={!currentHop || isVirtualHop}
+                  onClick={handleDownloadHopPcap}
+                  className="brutalist-select-option text-left text-[10.5px] cursor-pointer outline-none hover:bg-ink hover:text-base disabled:opacity-30 disabled:pointer-events-none transition-colors border-b border-ink/10 px-3 py-2 flex items-center justify-between"
+                >
+                  <span>DOWNLOAD HOP PCAP</span>
+                </button>
+                <button
+                  disabled={hops.length === 0}
+                  onClick={handleDownloadTracePcap}
+                  className="brutalist-select-option text-left text-[10.5px] cursor-pointer outline-none hover:bg-ink hover:text-base disabled:opacity-30 disabled:pointer-events-none transition-colors px-3 py-2 flex items-center justify-between"
+                >
+                  <span>DOWNLOAD TRACE PCAP</span>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </header>
 
       {/* ── MAIN ANALYZER SPLIT PANEL ─────────────────────────────────────── */}
@@ -257,9 +334,9 @@ export default function PacketViewerPage() {
 
         {/* COLUMN 1: TRACE HOPS LIST (30% Width) */}
         <section className="w-full lg:w-[320px] xl:w-[380px] border-b lg:border-b-0 lg:border-r border-ink bg-base flex flex-col shrink-0 h-[280px] lg:h-full overflow-hidden z-20">
-          <div className="h-[40px] border-b border-ink/20 flex items-center justify-between px-3 bg-ink/[0.02] select-none shrink-0 font-mono text-[11px] uppercase font-bold tracking-wider">
-            <span className="flex items-center gap-1"><Terminal className="w-3.5 h-3.5 text-accent" /> Trace Resolution Hops</span>
-            <span className="opacity-30 text-[9.5px]">HOPS: {hops.length}</span>
+          <div className="h-[40px] border-b border-ink/20 flex items-center justify-between px-3 bg-ink/[0.02] select-none shrink-0 text-[11px] font-bold uppercase tracking-wider font-mono">
+            <span className="flex items-center gap-1 font-display font-black text-xs tracking-wider"><Terminal className="w-3.5 h-3.5 text-accent" /> Trace Resolution Hops</span>
+            <span className="opacity-30 text-[9.5px] font-mono">HOPS: {hops.length}</span>
           </div>
 
           {/* Scrolling Hops List */}
@@ -319,8 +396,8 @@ export default function PacketViewerPage() {
         </section>
 
         <section className="flex-1 bg-white flex flex-col overflow-hidden h-full z-20">
-          <div className="h-[40px] border-b border-ink/20 flex items-center justify-between px-3 bg-ink/[0.02] select-none shrink-0 font-mono text-[11px] uppercase font-bold tracking-wider">
-            <span className="flex items-center gap-1.5"><Info className="w-3.5 h-3.5 text-accent" /> Packet Dissect Console</span>
+          <div className="h-[40px] border-b border-ink/20 flex items-center justify-between px-3 bg-ink/[0.02] select-none shrink-0 font-mono text-[11px] uppercase font-bold tracking-wider relative">
+            <span className="flex items-center gap-1.5 font-display font-black text-xs tracking-wider"><Info className="w-3.5 h-3.5 text-accent" /> Packet Dissect Console</span>
 
             {/* Parallel record selector inside the console bar */}
             {hasMultipleParallel && (
@@ -346,12 +423,12 @@ export default function PacketViewerPage() {
 
             {/* Request vs Response Tabs */}
             {currentHop && !isVirtualHop && (
-              <div className="flex gap-1 select-none">
+              <div className="flex select-none h-full items-end self-end">
                 <button
                   onClick={() => setActiveTab('REQUEST')}
-                  className={`px-2.5 py-1 border text-[9.5px] font-bold transition-all cursor-pointer ${activeTab === 'REQUEST'
-                    ? 'bg-ink text-base border-ink'
-                    : 'bg-base border-ink/15 text-ink hover:border-ink/50'
+                  className={`px-4.5 h-[34px] text-[9.5px] font-bold transition-all cursor-pointer flex items-center border-t-2 border-x ${activeTab === 'REQUEST'
+                    ? 'bg-white border-t-accent border-x-ink/20 border-b border-b-transparent text-ink z-10 translate-y-[1px]'
+                    : 'bg-transparent border-t-transparent border-x-transparent border-b border-b-transparent text-ink/50 hover:text-ink'
                     }`}
                 >
                   REQUEST PACKET
@@ -359,9 +436,9 @@ export default function PacketViewerPage() {
                 <button
                   onClick={() => setActiveTab('RESPONSE')}
                   disabled={activeResponsePacket === null || isTimeout}
-                  className={`px-2.5 py-1 border text-[9.5px] font-bold transition-all cursor-pointer disabled:opacity-30 disabled:pointer-events-none ${activeTab === 'RESPONSE'
-                    ? 'bg-ink text-base border-ink'
-                    : 'bg-base border-ink/15 text-ink hover:border-ink/50'
+                  className={`px-4.5 h-[34px] text-[9.5px] font-bold transition-all cursor-pointer disabled:opacity-20 disabled:pointer-events-none flex items-center border-t-2 border-x ${activeTab === 'RESPONSE'
+                    ? 'bg-white border-t-accent border-x-ink/20 border-b border-b-transparent text-ink z-10 translate-y-[1px]'
+                    : 'bg-transparent border-t-transparent border-x-transparent border-b border-b-transparent text-ink/50 hover:text-ink'
                     }`}
                 >
                   RESPONSE PACKET
@@ -481,11 +558,17 @@ function renderFrameNode(packet, timestamp, ip, port, tab) {
         <Monitor className="w-3.5 h-3.5 text-accent" />
         Frame: {bytesCount} bytes on wire, {bytesCount} bytes captured
       </div>
-      <div className="pl-4 text-[10px] text-ink/50 flex flex-col gap-0.5 mt-1 font-medium select-text">
+      <div className="pl-4 text-[10px] text-ink/50 flex flex-col gap-0.5 mt-1 font-medium select-text border-b border-ink/5 pb-2">
         <span>• Arrival Time: {timeString}</span>
         <span>• Protocols in Frame: UDP ({port || 53}) &rarr; DNS</span>
         <span>• Name Server Host Target: {ip || '127.0.0.1'}:{port || 53}</span>
         <span>• Capture Size: {bytesCount} bytes ({bytesCount * 8} bits)</span>
+      </div>
+      <div className="mt-2.5 p-2.5 border border-dashed border-ink/20 bg-ink/[0.02] font-mono text-[9px] text-ink/65 flex items-start gap-2 select-none leading-relaxed">
+        <Info className="w-3.5 h-3.5 text-accent shrink-0 mt-0.5" />
+        <div>
+          <span className="font-bold text-accent">NOTICE:</span> Ethernet/IP framing and client IP/MAC addresses are mock-reconstructed client-side for compatibility. The nameserver IP is extracted dynamically from the trace.
+        </div>
       </div>
     </div>
   );

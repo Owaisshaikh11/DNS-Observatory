@@ -2,6 +2,9 @@ import { useState } from 'react';
 import FlagBadge from './FlagBadge';
 import RecordTable from './RecordTable';
 import HexViewer from './HexViewer';
+import { Download } from 'lucide-react';
+import { exportHopPcap } from '../utils/pcapExporter';
+import { useTraceStore } from '../stores/useTraceStore';
 
 export default function HopInspector({ hop, secondsElapsed = 0 }) {
   const [showHex, setShowHex] = useState(false);
@@ -166,19 +169,34 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
         </div>
       )}
 
-      {/* Raw Hex bytes collapsible */}
-      {hop.response?.rawHex && (
-        <div className="mt-1 flex-none">
+      {/* Exporter and Hex Viewer Buttons */}
+      {!isClient && hop.type !== 'CNAME_REDIRECT' && (
+        <div className="mt-1 flex flex-col gap-2 flex-none font-mono">
           <button
-            onClick={() => setShowHex(!showHex)}
-            className="font-mono text-[8px] font-bold px-2 py-1 bg-ink text-base border border-ink tracking-wider uppercase hover:bg-accent hover:border-accent transition-colors duration-150 cursor-pointer w-full text-left flex justify-between select-none"
+            onClick={() => {
+              const timestamp = useTraceStore.getState().traceData?.timestamp;
+              exportHopPcap(hop, timestamp);
+            }}
+            className="text-[8px] font-bold px-2 py-1.5 border border-ink bg-white text-ink tracking-wider uppercase hover:bg-accent hover:border-accent hover:text-white transition-colors duration-150 cursor-pointer w-full text-center flex items-center justify-center gap-1.5 shadow-[2px_2px_0_0_#0D0D0D] hover:translate-y-[-0.5px] active:translate-y-0 active:shadow-none"
           >
-            <span>{showHex ? '▲ Hide Raw Packet bytes' : '▼ Raw Packet bytes'}</span>
-            <span>{showHex ? '[-]' : '[+]'}</span>
+            <Download className="w-3 h-3" />
+            <span>Download Hop PCAP</span>
           </button>
-          {showHex && (
-            <div className="mt-2">
-              <HexViewer hexString={hop.response.rawHex} />
+
+          {hop.response?.rawHex && (
+            <div>
+              <button
+                onClick={() => setShowHex(!showHex)}
+                className="text-[8px] font-bold px-2 py-1.5 bg-ink text-base border border-ink tracking-wider uppercase hover:bg-accent hover:border-accent transition-colors duration-150 cursor-pointer w-full text-left flex justify-between select-none"
+              >
+                <span>{showHex ? '▲ Hide Raw Packet bytes' : '▼ Raw Packet bytes'}</span>
+                <span>{showHex ? '[-]' : '[+]'}</span>
+              </button>
+              {showHex && (
+                <div className="mt-2">
+                  <HexViewer hexString={hop.response.rawHex} />
+                </div>
+              )}
             </div>
           )}
         </div>

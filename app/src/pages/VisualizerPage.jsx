@@ -24,14 +24,19 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
       }
       logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Local Resolver at ${hop.ip}` });
     } else if (hop.type === 'LOCAL') {
-      logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking local cache & zone databases...` });
-      const answersList = hop.response?.answers || [];
-      const isAuthoritative = hop.response?.isAuthoritative || false;
-      if (isAuthoritative && answersList.length > 0) {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache hit! Found authoritative local zone mapping.` });
-        logLines.push({ time: timeStr, source: 'CLIENT', text: `Received response payload from local resolver: ${answersList.length} records resolved.` });
+      if (!hop.response) {
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Connection to Local DNS server failed. Bypassing local resolution.` });
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Querying DNS Root nameserver hints directly...` });
       } else {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache miss. Querying DNS Root nameserver hints...` });
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking local cache & zone databases...` });
+        const answersList = hop.response.answers || [];
+        const isAuthoritative = hop.response.isAuthoritative || false;
+        if (isAuthoritative && answersList.length > 0) {
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache hit! Found authoritative local zone mapping.` });
+          logLines.push({ time: timeStr, source: 'CLIENT', text: `Received response payload from local resolver: ${answersList.length} records resolved.` });
+        } else {
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache miss. Querying DNS Root nameserver hints...` });
+        }
       }
     } else if (hop.type === 'ROOT') {
       logLines.push({ time: timeStr, source: 'ROOT', text: `Querying Root Authority: ${hop.label} (${hop.ip})` });
@@ -47,7 +52,7 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
         logLines.push({ time: timeStr, source: 'AUTH', text: `NXDOMAIN response code returned. Requested domain target does not exist!` });
       } else {
         logLines.push({ time: timeStr, source: 'AUTH', text: `Final answer received (RCODE: ${rcode}, AA Flag: ${hop.response?.flags?.includes('AA') ? '1' : '0'}). Found ${answersCount} answers.` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. Cache database updated. Retransmitting payload to Client Stub.` });
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. [Notice: Caching bypassed to demonstrate full resolution path]. Retransmitting payload to Client Stub.` });
       }
     } else if (hop.type === 'CNAME_REDIRECT') {
       logLines.push({ time: timeStr, source: 'CNAME', text: `CNAME alias redirection: "${hop.cnameFrom.toUpperCase()}" -> "${hop.cnameTo.toUpperCase()}"` });
@@ -84,6 +89,7 @@ export default function VisualizerPage() {
 
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [showRawJson, setShowRawJson] = useState({});
   const consoleEndRef = useRef(null);
 
   // Split resizer and panel collapse overrides state
@@ -162,7 +168,10 @@ export default function VisualizerPage() {
     if (playbackState !== 'PLAYING' || !traceData || hops.length === 0) return;
 
     if (activeStep >= hops.length - 1) {
-      useTraceStore.setState({ playbackState: 'COMPLETE' });
+      const finalStatus = traceData.status || 'COMPLETE';
+      useTraceStore.setState({
+        playbackState: finalStatus === 'NOERROR' ? 'COMPLETE' : finalStatus
+      });
       return;
     }
 
@@ -256,7 +265,16 @@ export default function VisualizerPage() {
       return `${val.preference} ${val.exchange}`;
     }
     if (type === 'SOA') {
-      return `${val.mname} | Admin: ${val.rname} | S: ${val.serial}`;
+      return `MNAME: ${val.mname} | RNAME: ${val.rname} | S: ${val.serial} | RF: ${val.refresh} | RT: ${val.retry}`;
+    }
+    if (type === 'DS') {
+      return `Tag: ${val.keyTag} | Alg: ${val.algorithm} | Type: ${val.digestType} | Dig: ${val.digest.substring(0, 10)}...`;
+    }
+    if (type === 'DNSKEY') {
+      return `Flags: ${val.flags} | Proto: ${val.protocol} | KeyLen: ${val.keyLength}B`;
+    }
+    if (type === 'RRSIG') {
+      return `Covers: ${val.typeCovered} | KeyTag: ${val.keyTag} | Signer: ${val.signerName}`;
     }
     return JSON.stringify(val);
   };
@@ -389,6 +407,8 @@ export default function VisualizerPage() {
   const renderRecordCard = (rec, ri, type) => {
     const currentTtl = Math.max(0, rec.ttl - secondsElapsed);
     const isExpired = currentTtl === 0 && !isNxDomain;
+    const cardKey = `${type}-${rec.name || ''}-${ri}`;
+    const showJson = showRawJson[cardKey] === true;
 
     return (
       <div
@@ -406,9 +426,20 @@ export default function VisualizerPage() {
         )}
 
         {/* Record metadata header */}
-        {((rec.ttl !== undefined && rec.ttl !== null) || (rec.name && rec.name.replace(/\.$/, '') !== domain.replace(/\.$/, ''))) && (
+        {((rec.ttl !== undefined && rec.ttl !== null) || (rec.name && rec.name.replace(/\.$/, '') !== domain.replace(/\.$/, '')) || typeof rec.value === 'object') && (
           <div className="px-3 py-1 bg-ink/[0.02] border-b border-ink/10 flex justify-between items-center text-[8.5px] text-ink/50 select-none font-mono font-medium">
-            <span>{rec.ttl !== undefined ? `TTL ${currentTtl}s` : ''}</span>
+            <div className="flex items-center gap-1.5">
+              <span>{rec.ttl !== undefined ? `TTL ${currentTtl}s` : ''}</span>
+              {typeof rec.value === 'object' && (
+                <button
+                  type="button"
+                  onClick={() => setShowRawJson(prev => ({ ...prev, [cardKey]: !prev[cardKey] }))}
+                  className="px-1 border border-ink/20 hover:border-ink hover:text-accent transition-colors cursor-pointer text-[7.5px] uppercase font-bold"
+                >
+                  {showJson ? 'TEXT' : 'JSON'}
+                </button>
+              )}
+            </div>
             {rec.name && rec.name.replace(/\.$/, '') !== domain.replace(/\.$/, '') && (
               <span className="truncate max-w-[160px]" title={rec.name}>
                 {rec.name}
@@ -419,7 +450,7 @@ export default function VisualizerPage() {
 
         {/* Record value */}
         <div className="px-3 py-1.5 font-mono text-[10.5px] break-all leading-relaxed text-ink/80 select-all font-medium">
-          {formatRecordValue(rec.value, type)}
+          {showJson ? JSON.stringify(rec.value) : formatRecordValue(rec.value, type)}
         </div>
       </div>
     );
@@ -591,7 +622,7 @@ export default function VisualizerPage() {
                     <div className="absolute top-0 bottom-1 left-0 w-[1px] bg-ink/20" />
                     {cnameChain.map((cn, ci) => (
                       <div key={ci} className="text-ink/75 pl-3.5 truncate text-[11px] leading-relaxed">
-                        ↳ CNAME alias.{cn.to.replace(/\.$/, '')}
+                        ↳ CNAME alias: {cn.to.replace(/\.$/, '')}
                       </div>
                     ))}
                     <div className="text-accent font-bold pl-3.5 text-[11px] leading-relaxed">

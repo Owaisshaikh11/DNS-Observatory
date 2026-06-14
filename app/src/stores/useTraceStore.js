@@ -18,7 +18,7 @@ export const useTraceStore = create((set, get) => ({
   setIsBenchmarkMode: (isBenchmarkMode) => set({ isBenchmarkMode }),
   setBenchmarkData: (benchmarkData) => set({ benchmarkData }),
   setIsBenchmarking: (isBenchmarking) => set({ isBenchmarking }),
-  
+
   startTrace: async (domain, type) => {
     const isBenchmarkMode = get().isBenchmarkMode;
     set({
@@ -37,31 +37,31 @@ export const useTraceStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain, type }),
       })
-      .then(res => res.json())
-      .then(data => {
-        set({ benchmarkData: data, isBenchmarking: false });
-        return data;
-      })
-      .catch(error => {
-        console.error("Failed to run benchmark:", error);
-        set({ isBenchmarking: false });
-        return null;
-      });
+        .then(res => res.json())
+        .then(data => {
+          set({ benchmarkData: data, isBenchmarking: false });
+          return data;
+        })
+        .catch(error => {
+          console.error("Failed to run benchmark:", error);
+          set({ isBenchmarking: false });
+          return null;
+        });
     }
-    
+
     try {
       const response = await fetch('/api/dns/trace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain, type }),
       })
-      
+
       const data = await response.json()
-      set({ 
+      set({
         traceData: data,
-        playbackState: data.status === 'NOERROR' ? 'PLAYING' : 'NXDOMAIN'
+        playbackState: 'PLAYING'
       })
-      
+
       if (isBenchmarkMode) {
         await benchmarkPromise;
       }

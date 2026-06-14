@@ -39,6 +39,7 @@ const getLatencyColor = (latencyMs) => {
 };
 
 export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, recordType }) {
+  const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
   const columns = hops?.length || 1;
   const W = Math.max(850, columns * 240);
   const H = 280;
@@ -263,7 +264,12 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
             const cpX = midX;
             const cpY = fc.y === tc.y ? fc.y + 1 : (fc.y + tc.y) / 2 + 3;
 
-            const strokeColor = isActive ? getLatencyColor(toNode.latencyMs) : 'rgba(13,13,13,0.1)';
+            const isFinalFailedEdge = isFailedTrace && toNode.id === (hops[hops.length - 1]?.id);
+            const strokeColor = isActive
+              ? isFinalFailedEdge
+                ? '#EF4444'
+                : getLatencyColor(toNode.latencyMs)
+              : 'rgba(13,13,13,0.1)';
             const dotColor = strokeColor;
 
             const isHovered = activeTooltip?.edge === edge;
@@ -520,7 +526,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     y={node.treeY + 2.5}
                     width={NW}
                     height={NH}
-                    fill={isSel ? 'var(--color-accent)' : 'var(--color-ink)'}
+                    fill={isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '#EF4444' : isSel ? 'var(--color-accent)' : 'var(--color-ink)'}
                     className="opacity-20 group-hover:opacity-30 transition-opacity duration-200"
                   />
                 )}
@@ -536,7 +542,9 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                   >
                     <div
                       className={`w-full h-full border flex flex-col justify-between p-1.5 select-none transition-all duration-200 ${
-                        isSel
+                        isFailedTrace && node.id === (hops[hops.length - 1]?.id)
+                          ? 'bg-red-50 text-red-600 border-[#EF4444] border-2 shadow-[2px_2px_0_0_#EF4444]'
+                          : isSel
                           ? isCname
                             ? 'bg-accent text-base border-accent'
                             : 'bg-ink text-base border-ink'
@@ -551,30 +559,40 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                       {/* Top line: flag + label + optional AA badge */}
                       <div className="flex items-center gap-1 w-full min-w-0">
                         <span className="text-[10px] shrink-0 leading-none select-none">
-                          {isReached ? (node.geo?.flag || '🌐') : '🌐'}
+                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '⚠️' : isReached ? (node.geo?.flag || '🌐') : '🌐'}
                         </span>
-                        <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
+                        <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
                           {node.label}
                         </span>
-                        {!isCname && isReached && node.response?.flags?.includes('AA') && (
-                          <span className={`ml-auto text-[6px] font-mono font-bold px-0.5 border leading-none shrink-0 select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
-                            AA
+                        {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? (
+                          <span className="ml-auto text-[6px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none shrink-0 select-none">
+                            {playbackState}
                           </span>
+                        ) : (
+                          !isCname && isReached && node.response?.flags?.includes('AA') && (
+                            <span className={`ml-auto text-[6px] font-mono font-bold px-0.5 border leading-none shrink-0 select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
+                              AA
+                            </span>
+                          )
                         )}
                       </div>
 
                       {/* Middle line: IP / Latency or target CNAME */}
-                      <div className={`font-mono text-[7px] leading-none truncate ${isSel ? 'text-base/60' : 'text-ink/40'}`}>
-                        {isCname
+                      <div className={`font-mono text-[7px] leading-none truncate ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-500 font-bold' : isSel ? 'text-base/60' : 'text-ink/40'}`}>
+                        {isFailedTrace && node.id === (hops[hops.length - 1]?.id)
+                          ? `RESOLVE FAIL: ${playbackState}`
+                          : isCname
                           ? (isReached ? `→ ${node.cnameTo}` : '?.?.?.?')
                           : (isReached ? node.ip : '?.?.?.?')
                         }
-                        {isReached && node.latencyMs > 0 ? ` · ${node.latencyMs}ms` : ''}
+                        {!(isFailedTrace && node.id === (hops[hops.length - 1]?.id)) && isReached && node.latencyMs > 0 ? ` · ${node.latencyMs}ms` : ''}
                       </div>
 
                       {/* Bottom line: Org */}
-                      <div className={`font-mono text-[6.5px] leading-none truncate ${isSel ? 'text-base/40' : 'text-ink/35'}`} style={{ maxWidth: NW - 12 }}>
-                        {isCname
+                      <div className={`font-mono text-[6.5px] leading-none truncate ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-400 font-medium' : isSel ? 'text-base/40' : 'text-ink/35'}`} style={{ maxWidth: NW - 12 }}>
+                        {isFailedTrace && node.id === (hops[hops.length - 1]?.id)
+                          ? `Failed at this resolver`
+                          : isCname
                           ? (isReached ? `Alias of ${node.cnameFrom}` : 'Awaiting Redirection...')
                           : (isReached
                               ? (node.geo?.org ? (node.geo.org.length > 25 ? `${node.geo.org.substring(0, 22)}...` : node.geo.org) : '')

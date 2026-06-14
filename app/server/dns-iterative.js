@@ -28,23 +28,23 @@ const ROOT_SERVERS = require('./root-hints');
 
 // ── Record type name → number ──────────────────────────────────────────────
 const TYPE_NUMBERS = {
-  A:     1,
-  NS:    2,
+  A: 1,
+  NS: 2,
   CNAME: 5,
-  SOA:   6,
-  MX:    15,
-  TXT:   16,
-  AAAA:  28,
+  SOA: 6,
+  MX: 15,
+  TXT: 16,
+  AAAA: 28,
 };
 
 // ── Fixed SVG tree positions for each hop type ─────────────────────────────
 // These match the layout in Visualization_demo_option_c_hybrid.html
 const TREE_POSITIONS = {
-  CLIENT: { treeX: 20,  treeY: 55 },
-  LOCAL:  { treeX: 185, treeY: 55 },
-  ROOT:   { treeX: 370, treeY: 15 },
-  TLD:    { treeX: 370, treeY: 95 },
-  AUTH:   { treeX: 580, treeY: 55 },
+  CLIENT: { treeX: 20, treeY: 55 },
+  LOCAL: { treeX: 185, treeY: 55 },
+  ROOT: { treeX: 370, treeY: 15 },
+  TLD: { treeX: 370, treeY: 95 },
+  AUTH: { treeX: 580, treeY: 55 },
   CNAME_REDIRECT: { treeX: 0, treeY: 55 },
 };
 
@@ -106,7 +106,7 @@ function sendUdpQuery(ip, port, queryBuffer, timeoutMs = 3000) {
 async function performHop(ip, port, domain, typeNum, opts = {}) {
   const query = buildDnsQuery(domain, typeNum, {
     recursionDesired: opts.recursionDesired || false,
-    dnssecOk:         opts.dnssecOk !== false, // default true for DNSSEC visibility
+    dnssecOk: opts.dnssecOk !== false, // default true for DNSSEC visibility
   });
 
   const queryHex = [...query].map(b => b.toString(16).padStart(2, '0')).join(' ');
@@ -203,20 +203,20 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
     parallelQueries: parallelQueries || null,
     queryPacket: queryPacket || null,
     response: parsed ? {
-      id:         parsed.id,
-      rawFlags:   parsed.rawFlags,
-      flags:      parsed.flags,
-      qdcount:    parsed.qdcount,
-      ancount:    parsed.ancount,
-      nscount:    parsed.nscount,
-      arcount:    parsed.arcount,
-      questions:  parsed.questions,
-      rcode:      parsed.rcode,
-      answers:    parsed.answers,
-      authority:  parsed.authority,
+      id: parsed.id,
+      rawFlags: parsed.rawFlags,
+      flags: parsed.flags,
+      qdcount: parsed.qdcount,
+      ancount: parsed.ancount,
+      nscount: parsed.nscount,
+      arcount: parsed.arcount,
+      questions: parsed.questions,
+      rcode: parsed.rcode,
+      answers: parsed.answers,
+      authority: parsed.authority,
       additional: parsed.additional,
-      dnssec:     parsed.dnssec,
-      rawHex:     parsed.rawHex,
+      dnssec: parsed.dnssec,
+      rawHex: parsed.rawHex,
       byteLength: byteLength || null,
     } : null,
     ...TREE_POSITIONS[type],             // treeX, treeY for SVG layout
@@ -423,7 +423,7 @@ async function iterativeTrace(domain, recordType = 'A') {
 
     if (isLocalHit && localParsed) {
       edges.push({ from: localHopId, to: authHopId, label: 'Local authoritative answer' });
-      
+
       hops.push(buildHop({
         id: authHopId,
         step: hops.length,
@@ -826,22 +826,22 @@ async function benchmarkResolvers(domain, recordType = 'A') {
         timeoutMs: 5000,
       });
       return {
-        resolver:    resolverName,
-        ip:          resolverIp,
-        latencyMs:   Date.now() - start,
-        rcode:       parsed.rcode,
+        resolver: resolverName,
+        ip: resolverIp,
+        latencyMs: Date.now() - start,
+        rcode: parsed.rcode,
         answerCount: parsed.answers.length,
-        answers:     parsed.answers,
+        answers: parsed.answers,
       };
     } catch (err) {
       return {
-        resolver:    resolverName,
-        ip:          resolverIp,
-        latencyMs:   Date.now() - start,
-        rcode:       'TIMEOUT',
+        resolver: resolverName,
+        ip: resolverIp,
+        latencyMs: Date.now() - start,
+        rcode: 'TIMEOUT',
         answerCount: 0,
-        answers:     [],
-        error:       err.message,
+        answers: [],
+        error: err.message,
       };
     }
   };
@@ -861,18 +861,18 @@ function buildTraceResult({ domain, recordType, hops, edges, finalParsed, dnssec
 
   return {
     domain,
-    recordType:    recordType.toUpperCase(),
-    status:        finalParsed ? finalParsed.rcode : 'UNKNOWN',
+    recordType: recordType.toUpperCase(),
+    status: finalParsed ? finalParsed.rcode : 'UNKNOWN',
     totalLatency,
     dnssecPresent: dnssecPresent || (finalParsed ? finalParsed.dnssecPresent : false),
-    answers:       finalParsed ? finalParsed.answers : [],
+    answers: finalParsed ? finalParsed.answers : [],
     cnameChain,
     authZone,
     authNs,
-    hopCount:      hops.length,
+    hopCount: hops.length,
     hops,
     edges,
-    timestamp:     Date.now(),
+    timestamp: Date.now(),
   };
 }
 

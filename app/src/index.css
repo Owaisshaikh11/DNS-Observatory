@@ -217,9 +217,9 @@ body {
 
 
 /* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--ink); }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--base); border-left: 1px solid rgba(13, 13, 13, 0.08); }
+::-webkit-scrollbar-thumb { background: var(--ink); border: 1px solid var(--base); }
 
 /* Sharp border utility */
 .sharp-border { border: 1px solid var(--ink); }
