@@ -88,18 +88,18 @@ const Footer = forwardRef(function Footer({ scrollContainerRef }, ref) {
       className="sticky bottom-0 left-0 w-full z-0 bg-ink text-base flex flex-col pt-2 md:pt-5 overflow-hidden selection:bg-accent selection:text-ink shrink-0"
     >
 
-      {/* ── Strict Tabular Framing (4-column blueprint grid) ──────────── */}
+      {/* ── Tabular Framing (4-column blueprint grid) ──────────── */}
       <div className="w-full px-6 md:px-12 mb-12">
         <div className="grid grid-cols-1 md:grid-cols-4 w-full border-b border-base/20 divide-y md:divide-y-0 md:divide-x divide-base/20 font-mono text-[10px] uppercase">
 
           <div className="flex flex-col p-8 gap-2 hover:bg-base/5 transition-colors cursor-default">
             <span className="opacity-40 mb-8 tracking-widest">Engineering & Design</span>
-            <span className="font-bold text-accent text-xs mt-auto">Owais Shaikh</span>
+            <span className="font-bold text-accent text-lg mt-auto">Owais Shaikh</span>
           </div>
 
           <div className="flex flex-col p-8 gap-2 hover:bg-base/5 transition-colors cursor-default">
             <span className="opacity-40 mb-8 tracking-widest">Copyright</span>
-            <span className="text-base mt-auto font-bold">© 2026 / Owais Shaikh</span>
+            <span className="text-lg mt-auto font-bold">© 2026 / Owais Shaikh</span>
           </div>
 
           <div className="flex flex-col p-8 gap-2 hover:bg-base/5 transition-colors group">
@@ -108,7 +108,7 @@ const Footer = forwardRef(function Footer({ scrollContainerRef }, ref) {
               href="https://github.com/owaisshaikh11"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 text-base mt-auto font-bold w-max group-hover:text-accent transition-colors"
+              className="flex items-center gap-2 text-lg mt-auto font-bold w-max group-hover:text-accent transition-colors"
             >
               GitHub Source
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -119,7 +119,7 @@ const Footer = forwardRef(function Footer({ scrollContainerRef }, ref) {
 
           <div className="flex flex-col p-8 gap-2 hover:bg-base/5 transition-colors cursor-default">
             <span className="opacity-40 mb-8 tracking-widest">System Status</span>
-            <div className="flex items-center gap-3 mt-auto text-base font-bold">
+            <div className="flex items-center gap-3 mt-auto text-lg font-bold">
               <div className="w-2 h-2 bg-green-500 animate-pulse"></div>
               <span>OPERATIONAL</span>
             </div>
