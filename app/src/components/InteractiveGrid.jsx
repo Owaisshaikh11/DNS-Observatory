@@ -6,8 +6,11 @@ export default function InteractiveGrid() {
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (gridRef.current) {
-        gridRef.current.style.setProperty('--mouse-x', `${e.clientX}px`);
-        gridRef.current.style.setProperty('--mouse-y', `${e.clientY}px`);
+        const rect = gridRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        gridRef.current.style.setProperty('--mouse-x', `${x}px`);
+        gridRef.current.style.setProperty('--mouse-y', `${y}px`);
       }
     };
     window.addEventListener('mousemove', handleMouseMove);
@@ -15,7 +18,7 @@ export default function InteractiveGrid() {
   }, []);
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-10">
+    <div className="absolute inset-0 pointer-events-none z-[-1] interactive-grid-container">
       <div className="absolute inset-0 brutalist-grid"></div>
       <div
         ref={gridRef}

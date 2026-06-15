@@ -5,6 +5,7 @@ import { useTraceStore } from '../stores/useTraceStore';
 import CompactTree from '../components/CompactTree';
 import HopCard from '../components/HopCard';
 import HopInspector from '../components/HopInspector';
+import InteractiveGrid from '../components/InteractiveGrid';
 
 const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
   const logLines = [];
@@ -525,7 +526,8 @@ export default function VisualizerPage() {
   };
 
   return (
-    <div className="w-full h-full flex flex-col text-ink bg-base overflow-hidden selection:bg-accent selection:text-[var(--base)]">
+    <div className="w-full h-full flex flex-col text-ink bg-base overflow-hidden selection:bg-accent selection:text-[var(--base)] relative z-10">
+      <InteractiveGrid />
 
       {/* HEADER: Exactly matches ESC | WWW.DOMAIN.COM · TYPE: ALL format from prototype */}
       <header className="h-[40px] border-b border-ink flex items-center justify-between px-4 font-mono text-[11px] uppercase tracking-wider bg-base/80 backdrop-blur-md z-40 shrink-0 select-none">

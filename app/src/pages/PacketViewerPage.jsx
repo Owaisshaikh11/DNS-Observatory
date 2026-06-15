@@ -5,6 +5,7 @@ import { useTraceStore } from '../stores/useTraceStore';
 import { usePacketStore } from '../stores/usePacketStore';
 import { exportHopPcap, exportTracePcap } from '../utils/pcapExporter';
 import FlagBadge from '../components/FlagBadge';
+import InteractiveGrid from '../components/InteractiveGrid';
 import {
   Activity,
   Terminal,
@@ -272,7 +273,8 @@ export default function PacketViewerPage() {
   };
 
   return (
-    <div className="w-full h-full flex flex-col text-ink bg-base overflow-hidden selection:bg-accent selection:text-[var(--base)]">
+    <div className="w-full h-full flex flex-col text-ink bg-base overflow-hidden selection:bg-accent selection:text-[var(--base)] relative z-10">
+      <InteractiveGrid />
 
       {/* ── HEADER NAVIGATION STRIP ────────────────────────────────────────── */}
       <header className="h-[46px] border-b border-ink flex items-center justify-between px-4 font-mono text-[12px] sm:text-[13px] uppercase tracking-wider bg-base/80 backdrop-blur-md z-40 shrink-0 select-none">

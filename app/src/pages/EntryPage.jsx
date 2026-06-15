@@ -4,6 +4,9 @@ import { motion } from 'framer-motion';
 import { useTraceStore } from '../stores/useTraceStore';
 import BrutalistSelect from '../components/BrutalistSelect';
 import BentoBox from '../components/BentoBox';
+import PayloadLogo from '../components/PayloadLogo';
+import Footer from '../components/Footer';
+import InteractiveGrid from '../components/InteractiveGrid';
 
 const placeholderDomains = ['GOOGLE.COM', 'EXAMPLE.COM', 'GITHUB.COM', 'WIKIPEDIA.ORG'];
 
@@ -78,7 +81,11 @@ export default function EntryPage() {
   const inputRef = useRef(null);
 
   const [scrollY, setScrollY] = useState(0);
-  const handleScroll = (e) => setScrollY(e.currentTarget.scrollTop);
+  const [footerHeight, setFooterHeight] = useState(0);
+
+  const handleScroll = (e) => {
+    setScrollY(e.currentTarget.scrollTop);
+  };
 
   const getDynamicFontSize = (len) => {
     if (len > 30) return 'text-[3.5vw] md:text-[2.5vw]';
@@ -201,20 +208,61 @@ export default function EntryPage() {
       inputRef.current?.focus();
     }
   };
+  // Ref for the scroll container — passed to Footer for useScroll tracking
+  const scrollContainerRef = useRef(null);
+  const footerRef = useRef(null);
+
+  useEffect(() => {
+    if (!footerRef.current) return;
+    const observer = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        setFooterHeight(entry.contentRect.height);
+      }
+    });
+    observer.observe(footerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!scrollContainerRef.current) return;
+    const container = scrollContainerRef.current;
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    const reveal = Math.max(0, container.scrollTop - (maxScroll - footerHeight));
+    document.documentElement.style.setProperty('--footer-reveal', `${reveal}px`);
+  }, [scrollY, footerHeight]);
+
+  useEffect(() => {
+    return () => {
+      document.documentElement.style.setProperty('--footer-reveal', '0px');
+    };
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, y: -40 }}
       transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-      onScroll={handleScroll}
-      className="relative w-full h-full overflow-y-auto overflow-x-hidden flex flex-col text-ink"
+      className="relative w-full h-full overflow-hidden text-ink"
     >
+      {/* The Scrollable Page Content */}
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="relative w-full h-full overflow-y-auto overflow-x-hidden z-20"
+      >
+        <main
+          className="relative w-full min-h-screen bg-base shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col z-10"
+        >
+          <InteractiveGrid />
       {/* Branding Header with Reactive Glassmorphism */}
       <header className="brutalist-navbar">
-        <div className="flex flex-col">
-          <h1 className="font-display font-black text-xl md:text-2xl uppercase tracking-tighter leading-none">DNS Observatory</h1>
-          <span className="font-mono text-[9px] text-accent mt-1 tracking-widest">Resolution Lab</span>
+        <div className="flex items-center gap-3">
+          <PayloadLogo size={40} animate="inspect" />
+          <div className="flex flex-col">
+            <h1 className="font-display font-black text-xl md:text-2xl uppercase tracking-tighter leading-none">DNS Observatory</h1>
+            <span className="font-mono text-[9px] text-accent mt-1 tracking-widest">Resolution Lab</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-8 ">
@@ -490,23 +538,10 @@ export default function EntryPage() {
         </div>
       </div>
 
-      {/* Brutalist Footer */}
-      <footer className="brutalist-footer-custom">
-        <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start gap-12">
-          <div className="flex flex-col">
-            <span className="font-display font-black uppercase text-2xl tracking-tighter">DNS Observatory</span>
-            <span className="font-mono text-[10px] opacity-50 mt-2">© 2026 / OPEN SYSTEMS INTERFACE</span>
-            <a
-              href="https://github.com/owaisshaikh"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-[10px] uppercase font-bold text-accent mt-6 hover:text-ink hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-200 interactive-hover block border border-accent hover:border-ink px-6 py-3 w-max sharp-border"
-            >
-              CREATED BY OWAIS SHAIKH
-            </a>
-          </div>
-        </div>
-      </footer>
+        </main>
+        {/* The Sticky Footer Layer */}
+        <Footer ref={footerRef} scrollContainerRef={scrollContainerRef} />
+      </div>
     </motion.div>
   );
 }

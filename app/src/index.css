@@ -29,9 +29,16 @@
   --animate-scale-y: scale-y 2s ease-in-out infinite;
 
   @keyframes scale-y {
-    0%, 100% { transform: scaleY(1); }
-    50% { transform: scaleY(0.1); }
-}
+
+    0%,
+    100% {
+      transform: scaleY(1);
+    }
+
+    50% {
+      transform: scaleY(0.1);
+    }
+  }
 }
 
 @layer base {
@@ -50,16 +57,18 @@ body {
 /* Functional Brutalism Grid Backgrounds */
 .brutalist-grid {
   background-size: 40px 40px;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(13, 13, 13, 0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(13, 13, 13, 0.03) 1px, transparent 1px);
 }
+
 .brutalist-grid-accent {
   background-size: 40px 40px;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(255, 77, 0, 0.3) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 77, 0, 0.3) 1px, transparent 1px);
 }
+
 @media (hover: none) {
   .brutalist-grid-accent {
     display: none !important;
@@ -155,6 +164,7 @@ body {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
   transform: translateY(0) !important;
 }
+
 .brutalist-button:hover {
   background-color: var(--accent) !important;
   border-color: var(--accent) !important;
@@ -162,6 +172,7 @@ body {
   transform: translateY(-2px) !important;
   box-shadow: 3px 3px 0 0 var(--ink) !important;
 }
+
 .brutalist-button:active {
   transform: translateY(0) !important;
   box-shadow: none !important;
@@ -177,6 +188,7 @@ body {
   font-size: 12px !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
+
 .brutalist-select-trigger:hover {
   border-color: var(--ink) !important;
   box-shadow: 2px 2px 0 0 var(--ink) !important;
@@ -198,6 +210,7 @@ body {
   transition: all 0.15s ease !important;
   width: 100%;
 }
+
 .brutalist-select-option:hover {
   background-color: var(--ink) !important;
   color: var(--base) !important;
@@ -217,42 +230,61 @@ body {
 
 
 /* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--base); border-left: 1px solid rgba(13, 13, 13, 0.08); }
-::-webkit-scrollbar-thumb { background: var(--ink); border: 1px solid var(--base); }
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--base);
+  border-left: 1px solid rgba(13, 13, 13, 0.08);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ink);
+  border: 1px solid var(--base);
+}
 
 /* Sharp border utility */
-.sharp-border { border: 1px solid var(--ink); }
-.interactive { cursor: pointer; }
+.sharp-border {
+  border: 1px solid var(--ink);
+}
+
+.interactive {
+  cursor: pointer;
+}
 
 @keyframes dashFlow {
-    to { stroke-dashoffset: -20; }
+  to {
+    stroke-dashoffset: -20;
+  }
 }
 
 .arrow-path {
-    animation: dashFlow 0.8s linear infinite;
+  animation: dashFlow 0.8s linear infinite;
 }
 
 .packet-field:hover {
-    background: rgba(255, 77, 0, 0.06);
+  background: rgba(255, 77, 0, 0.06);
 }
 
 .hex-highlight {
-    background: rgba(255, 77, 0, 0.15);
-    border-radius: 2px;
+  background: rgba(255, 77, 0, 0.15);
+  border-radius: 2px;
 }
 
 .hop-card-highlight {
-    animation: hopFlash 1s ease-out;
+  animation: hopFlash 1s ease-out;
 }
 
 @keyframes hopFlash {
-    0% {
-        box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.5);
-    }
-    100% {
-        box-shadow: 0 0 0 0px rgba(255, 77, 0, 0);
-    }
+  0% {
+    box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.5);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0px rgba(255, 77, 0, 0);
+  }
 }
 
 /* Bento Box & Terminal Cursor Animations */
@@ -267,12 +299,14 @@ body {
   flex-direction: column !important;
   justify-content: space-between !important;
 }
+
 .brutalist-bento:hover {
   background-color: white !important;
   transform: translateY(-4px) !important;
   box-shadow: 4px 4px 0 0 var(--ink) !important;
   border-color: var(--ink) !important;
 }
+
 @media (min-width: 768px) {
   .brutalist-bento {
     padding: 40px !important;
@@ -280,8 +314,15 @@ body {
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }
 
 .animate-blink {
@@ -291,4 +332,230 @@ body {
 /* Speed up dash flow animation on path hover */
 .arrow-path-hovered {
   animation: dashFlow 0.35s linear infinite !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PAYLOAD LOGO 
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Hover Inspect: brackets separate, core magnifies */
+.payload-logo-inspect .pl-bracket-top {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.payload-logo-inspect .pl-bracket-bottom {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.payload-logo-inspect .pl-core {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: center;
+}
+
+.payload-logo-inspect:hover .pl-bracket-top {
+  transform: translate(4px, -4px);
+}
+
+.payload-logo-inspect:hover .pl-bracket-bottom {
+  transform: translate(-4px, 4px);
+}
+
+.payload-logo-inspect:hover .pl-core {
+  transform: scale(1.3);
+}
+
+/* Idle: breathing core pulse */
+@keyframes payloadCoreBreathe {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(0.8);
+    opacity: 0.7;
+  }
+}
+
+.payload-logo-idle .pl-core {
+  transform-origin: center;
+  animation: payloadCoreBreathe 3s ease-in-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   404 PAGE — Text Stroke, Glitch & Panic Mode
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Outlined text strokes */
+.text-outline-ink {
+  -webkit-text-stroke: 2px var(--ink);
+  color: transparent;
+}
+
+.text-outline-accent {
+  -webkit-text-stroke: 2px var(--accent);
+  color: transparent;
+}
+
+.text-solid-ink {
+  -webkit-text-stroke: 2px var(--ink);
+  color: var(--base);
+  transition: color 0.2s, transform 0.2s, text-shadow 0.2s;
+}
+
+@media (min-width: 768px) {
+  .text-outline-ink {
+    -webkit-text-stroke: 4px var(--ink);
+  }
+
+  .text-outline-accent {
+    -webkit-text-stroke: 4px var(--accent);
+  }
+
+  .text-solid-ink {
+    -webkit-text-stroke: 4px var(--ink);
+  }
+
+  .panic-layer-1 {
+    -webkit-text-stroke: 4px var(--ink) !important;
+  }
+
+  .panic-layer-2 {
+    -webkit-text-stroke: 4px var(--accent) !important;
+  }
+}
+
+/* Hard shadow hover effect on 404 digits */
+.hover-hard-shadow:hover {
+  color: var(--accent) !important;
+  transform: translate(-4px, -4px);
+  text-shadow: 8px 8px 0px var(--ink);
+}
+
+/* Clip-path slice glitch on NXDOMAIN text hover */
+@keyframes sliceGlitch {
+
+  0%,
+  100% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    transform: translate(0);
+  }
+
+  10% {
+    clip-path: polygon(0 15%, 100% 15%, 100% 30%, 0 30%);
+    transform: translate(-4px, 2px);
+  }
+
+  20% {
+    clip-path: polygon(0 60%, 100% 60%, 100% 80%, 0 80%);
+    transform: translate(4px, -2px);
+  }
+
+  30% {
+    clip-path: polygon(0 30%, 100% 30%, 100% 50%, 0 50%);
+    transform: translate(-2px, 4px);
+  }
+
+  40% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    transform: translate(0);
+  }
+}
+
+.hover-glitch:hover {
+  animation: sliceGlitch 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+  color: var(--accent);
+}
+
+/* Panic mode — layered clip-path glitch on 404 digits */
+@keyframes glitchAnim1 {
+
+  0%,
+  100% {
+    clip-path: inset(20% 0 60% 0);
+    transform: translate(-8px, 0);
+  }
+
+  20% {
+    clip-path: inset(60% 0 20% 0);
+    transform: translate(8px, 0);
+  }
+
+  40% {
+    clip-path: inset(40% 0 40% 0);
+    transform: translate(-8px, 0);
+  }
+
+  60% {
+    clip-path: inset(80% 0 5% 0);
+    transform: translate(8px, 0);
+  }
+
+  80% {
+    clip-path: inset(10% 0 70% 0);
+    transform: translate(-8px, 0);
+  }
+}
+
+@keyframes glitchAnim2 {
+
+  0%,
+  100% {
+    clip-path: inset(15% 0 65% 0);
+    transform: translate(8px, 0);
+  }
+
+  20% {
+    clip-path: inset(50% 0 30% 0);
+    transform: translate(-8px, 0);
+  }
+
+  40% {
+    clip-path: inset(70% 0 10% 0);
+    transform: translate(8px, 0);
+  }
+
+  60% {
+    clip-path: inset(20% 0 50% 0);
+    transform: translate(-8px, 0);
+  }
+
+  80% {
+    clip-path: inset(60% 0 15% 0);
+    transform: translate(8px, 0);
+  }
+}
+
+.panic-layer-1 {
+  position: absolute;
+  inset: 0;
+  animation: glitchAnim1 0.25s infinite linear alternate-reverse;
+  color: var(--accent);
+  -webkit-text-stroke: 2px var(--ink);
+}
+
+.panic-layer-2 {
+  position: absolute;
+  inset: 0;
+  animation: glitchAnim2 0.3s infinite linear alternate-reverse;
+  color: transparent;
+  -webkit-text-stroke: 2px var(--accent);
+}
+
+.panic-text-shadow {
+  color: var(--accent);
+  text-shadow: 8px 8px 0px var(--ink), -4px -4px 0px var(--base);
+}
+
+/* Prevent grid hover highlight/spotlight from showing over the footer */
+body:has(footer:hover) .brutalist-grid-accent {
+  opacity: 0 !important;
+}
+
+/* Clip grid background exactly at the boundary of the revealed footer */
+.interactive-grid-container {
+  clip-path: inset(0 0 var(--footer-reveal, 0px) 0);
+  transition: clip-path 0.05s linear;
 }
