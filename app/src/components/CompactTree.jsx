@@ -182,10 +182,10 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     });
   };
 
-  // Initialize: Center whole canvas on columns change
+  // Initialize: Center whole canvas on defaultScale change
   useEffect(() => {
     centerCanvas(defaultScale);
-  }, [columns, defaultScale]);
+  }, [defaultScale]);
 
   // Camera follow effect for active steps during playback
   useEffect(() => {
