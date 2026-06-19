@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export const usePacketStore = create((set, get) => ({
+export const usePacketStore = create((set) => ({
   // Selected trace hop ID for packet viewer
   selectedHopId: null,
 

@@ -38,9 +38,9 @@ const getLatencyColor = (latencyMs) => {
   return '#EF4444'; // red
 };
 
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, recordType }) {
+export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
-  const [layers, branchMap, branches, maxLayer] = (() => {
+  const [layers, , branches, maxLayer] = (() => {
     const l = {};
     const bMap = new Map();
     const bList = ['main'];
@@ -244,7 +244,6 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const mainLayers = Array.from(new Set(mainHops.map(h => layers[h.id] || 0))).sort((a, b) => a - b);
   for (let i = 0; i < mainLayers.length - 1; i++) {
     const l1 = mainLayers[i];
-    const l2 = mainLayers[i+1];
     const nodeInL1 = mainHops.find(h => (layers[h.id] || 0) === l1);
     let label = 'DELEGATION LAYER';
     if (nodeInL1) {

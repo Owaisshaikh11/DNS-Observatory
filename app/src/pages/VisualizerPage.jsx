@@ -382,7 +382,6 @@ export default function VisualizerPage() {
   // Compute live countdown TTL based on minimum answer record TTL
   const answers = traceData?.answers || [];
   const minTtl = answers.length > 0 ? Math.min(...answers.map((a) => a.ttl)) : 60;
-  const realTtl = Math.max(0, minTtl - secondsElapsed);
 
   // Retrieve authority and additional records from final hop response
   const finalHop = hops[hops.length - 1];
