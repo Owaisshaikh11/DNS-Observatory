@@ -226,7 +226,8 @@ export function buildEthernetPacket({
 
   return {
     pcapPacketHeader,
-    fullPacket
+    fullPacket,
+    timestampMs
   };
 }
 
@@ -345,6 +346,9 @@ export function exportHopPcap(hop, traceTimestamp) {
 
   if (packets.length === 0) return false;
 
+  // Sort packets chronologically
+  packets.sort((a, b) => a.timestampMs - b.timestampMs);
+
   const fileBytes = generatePcapFile(packets);
   const cleanDomain = (hop.queryDomain || 'dns-query').replace(/[^a-zA-Z0-9.-]/g, '_');
   const filename = `hop_${hop.step}_${hop.type.toLowerCase()}_${cleanDomain}.pcap`;
@@ -359,8 +363,13 @@ export function exportTracePcap(hops, traceTimestamp, domain = 'dns-trace') {
   let clientPortOffset = 0;
 
   for (const hop of hops) {
-    // Skip virtual client stubs / CNAME local redirects that have no wire packets
-    if (hop.type === 'CLIENT' || hop.type === 'CNAME_REDIRECT') {
+    // Skip virtual client stubs, CNAME redirects, zone changes, and final answer virtual steps that have no wire packets
+    if (
+      hop.type === 'CLIENT' ||
+      hop.type === 'CNAME_REDIRECT' ||
+      hop.type === 'ZONE' ||
+      hop.type === 'ANSWERS'
+    ) {
       continue;
     }
 
@@ -433,6 +442,9 @@ export function exportTracePcap(hops, traceTimestamp, domain = 'dns-trace') {
   }
 
   if (packets.length === 0) return false;
+
+  // Sort packets chronologically to ensure requests are grouped before replies and parallel flows are properly ordered
+  packets.sort((a, b) => a.timestampMs - b.timestampMs);
 
   const fileBytes = generatePcapFile(packets);
   const cleanDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '_');

@@ -40,24 +40,71 @@ const getLatencyColor = (latencyMs) => {
 
 export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, recordType }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
-  const columns = hops?.length || 1;
-  const W = Math.max(850, columns * 240);
-  const H = 280;
-  const paddingX = 30;
+  const [layers, branchMap, branches, maxLayer] = (() => {
+    const l = {};
+    const bMap = new Map();
+    const bList = ['main'];
+
+    for (const h of hops || []) {
+      l[h.id] = 0;
+      bMap.set(h.id, h.subTraceFor || 'main');
+      if (h.subTraceFor && !bList.includes(h.subTraceFor)) {
+        bList.push(h.subTraceFor);
+      }
+    }
+
+    let changed = true;
+    for (let pass = 0; pass < 15 && changed; pass++) {
+      changed = false;
+      for (const edge of edges || []) {
+        if (edge.label && edge.label.startsWith('Glue')) continue;
+        const fromRank = l[edge.from] || 0;
+        const toRank = l[edge.to] || 0;
+        const targetRank = fromRank + 1;
+        if (targetRank > toRank) {
+          l[edge.to] = targetRank;
+          changed = true;
+        }
+      }
+    }
+
+    const maxL = Math.max(...Object.values(l), 0);
+    return [l, bMap, bList, maxL];
+  })();
+
+  const branchWidth = 260;
+  const mainWidth = 800;
+  const paddingX = 40;
+  const rowHeight = 72;
+
+  const W = Math.max(850, mainWidth + (branches.length - 1) * branchWidth + 100);
+  const H = Math.max(340, 80 + (maxLayer + 1) * rowHeight);
 
   // Dynamic layout calculations
-  const nodes = hops?.map((hop, index) => {
-    let treeX = paddingX;
-    if (columns > 1) {
-      treeX = paddingX + (index * (W - 2 * paddingX - NW)) / (columns - 1);
+  const nodes = (hops || []).map((hop) => {
+    const branchId = hop.subTraceFor || 'main';
+    const branchIdx = branches.indexOf(branchId);
+
+    let startX = paddingX;
+    let width = mainWidth;
+    if (branchIdx > 0) {
+      startX = paddingX + mainWidth + (branchIdx - 1) * branchWidth + 80;
+      width = branchWidth;
     }
 
-    let treeY = 118; // default center (perfectly symmetric vertically)
-    if (hop.type === 'ROOT') {
-      treeY = 30;
-    } else if (hop.type === 'TLD') {
-      treeY = 206;
+    const layer = layers[hop.id] || 0;
+    const siblings = (hops || []).filter(h => 
+      (h.subTraceFor || 'main') === branchId && (layers[h.id] || 0) === layer
+    );
+    const sibIdx = siblings.findIndex(h => h.id === hop.id);
+    const sibCount = siblings.length;
+
+    let treeX = startX + width / 2 - NW / 2;
+    if (sibCount > 1) {
+      treeX = startX + (sibIdx * (width - NW)) / (sibCount - 1);
     }
+
+    const treeY = 40 + layer * rowHeight;
 
     return {
       ...hop,
@@ -65,7 +112,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       treeY,
       isPlaceholder: false,
     };
-  }) || [];
+  });
 
   const edgesToRender = edges || [];
 
@@ -78,7 +125,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const [activeTooltip, setActiveTooltip] = useState(null); // { edge, toNode, x, y }
   const [hoveredParallelEdge, setHoveredParallelEdge] = useState(null); // edgeKey on hover
 
-  const defaultScale = columns > 5 ? Math.max(0.4, 5 / columns) : 1;
+  const defaultScale = Math.min(1, 850 / W);
 
   // Auto-centering helper
   const centerCanvas = (targetScale) => {
@@ -192,6 +239,29 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     setIsDragging(false);
   };
 
+  const midYLines = [];
+  const mainHops = (hops || []).filter(h => !h.isSubTrace);
+  const mainLayers = Array.from(new Set(mainHops.map(h => layers[h.id] || 0))).sort((a, b) => a - b);
+  for (let i = 0; i < mainLayers.length - 1; i++) {
+    const l1 = mainLayers[i];
+    const l2 = mainLayers[i+1];
+    const nodeInL1 = mainHops.find(h => (layers[h.id] || 0) === l1);
+    let label = 'DELEGATION LAYER';
+    if (nodeInL1) {
+      if (nodeInL1.type === 'CLIENT') label = 'LOCAL RESOLUTION BOUNDARY';
+      else if (nodeInL1.type === 'LOCAL') label = 'ROOT ZONE DELEGATION';
+      else if (nodeInL1.type === 'ZONE' && nodeInL1.zone === '.') label = 'ROOT SERVERS';
+      else if (nodeInL1.type === 'ROOT') label = 'TLD ZONE DELEGATION';
+      else if (nodeInL1.type === 'ZONE') label = 'AUTHORITATIVE DELEGATION';
+      else if (nodeInL1.type === 'TLD') label = 'AUTHORITATIVE NAMESERVERS';
+      else if (nodeInL1.type === 'AUTH') label = 'ANSWERS / CNAME CHAIN';
+    }
+    midYLines.push({
+      y: 40 + l1 * rowHeight + NH + (rowHeight - NH) / 2,
+      label
+    });
+  }
+
   return (
     <div
       ref={containerRef}
@@ -226,6 +296,16 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
           </defs>
           <rect width={W} height={H} fill="url(#treeGrid)" />
 
+          {/* Brutalist Zone Boundary Grid Lines */}
+          {midYLines.map((line, idx) => (
+            <g key={idx} className="opacity-15 select-none pointer-events-none">
+              <line x1={0} y1={line.y} x2={W} y2={line.y} stroke="var(--color-ink)" strokeWidth="0.8" strokeDasharray="3 3" />
+              <text x={20} y={line.y - 4} fontFamily="JetBrains Mono" fontSize="7px" fontWeight="black" fill="var(--color-ink)" className="uppercase tracking-widest">
+                :: {line.label}
+              </text>
+            </g>
+          ))}
+
           {/* Edges */}
           {edgesToRender.map((edge, i) => {
             const fromNode = nodes.find((n) => n.id === edge.from);
@@ -254,15 +334,15 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
             const midX = (fc.x + tc.x) / 2;
             const midY = (fc.y + tc.y) / 2;
 
-            // Horizontal Bezier curve (S-Curve) calculation
-            const cp1x = fc.x + (tc.x - fc.x) / 2;
-            const cp1y = fc.y;
-            const cp2x = fc.x + (tc.x - fc.x) / 2;
-            const cp2y = tc.y;
+            // Vertical Bezier curve (S-Curve) calculation
+            const cp1x = fc.x;
+            const cp1y = fc.y + (tc.y - fc.y) / 2;
+            const cp2x = tc.x;
+            const cp2y = fc.y + (tc.y - fc.y) / 2;
             const pathD = `M ${fc.x} ${fc.y} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${tc.y}`;
 
             const cpX = midX;
-            const cpY = fc.y === tc.y ? fc.y + 1 : (fc.y + tc.y) / 2 + 3;
+            const cpY = midY;
 
             const isFinalFailedEdge = isFailedTrace && toNode.id === (hops[hops.length - 1]?.id);
             const strokeColor = isActive
@@ -282,39 +362,19 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
               const offsets = Array.from({ length: N }, (_, idx) => (idx - (N - 1) / 2) * spacing);
               const edgeKey = `${edge.from}-${edge.to}`;
               const isParallelHovered = hoveredParallelEdge === edgeKey;
-              const centerIdx = Math.floor(N / 2);
 
               return (
                 <g key={i}>
-                  {/* Inline Definitions for text paths */}
-                  <defs>
-                    {offsets.map((offset, idx) => {
-                      const startY = fc.y + offset;
-                      const endY = tc.y + offset;
-                      const cp1x = fc.x + (tc.x - fc.x) / 2;
-                      const cp1y = startY;
-                      const cp2x = fc.x + (tc.x - fc.x) / 2;
-                      const cp2y = endY;
-                      return (
-                        <path
-                          key={idx}
-                          id={`tpath-${edgeKey}-${idx}`}
-                          d={`M ${fc.x} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${endY}`}
-                        />
-                      );
-                    })}
-                  </defs>
-
-                  {/* Render the visual dashed curves */}
+                  {/* Visual dashed curves */}
                   {offsets.map((offset, idx) => {
                     const qType = queryTypes[idx];
-                    const startY = fc.y + offset;
-                    const endY = tc.y + offset;
-                    const cp1x = fc.x + (tc.x - fc.x) / 2;
-                    const cp1y = startY;
-                    const cp2x = fc.x + (tc.x - fc.x) / 2;
-                    const cp2y = endY;
-                    const pathD = `M ${fc.x} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${endY}`;
+                    const startX = fc.x + offset;
+                    const endX = tc.x + offset;
+                    const p1x = startX;
+                    const p1y = fc.y + (tc.y - fc.y) / 2;
+                    const p2x = endX;
+                    const p2y = fc.y + (tc.y - fc.y) / 2;
+                    const subPathD = `M ${startX} ${fc.y} C ${p1x} ${p1y}, ${p2x} ${p2y}, ${endX} ${tc.y}`;
 
                     const isLineHovered = activeTooltip?.edge === edge || isParallelHovered;
 
@@ -322,16 +382,15 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                       <g key={qType}>
                         {isActive && isLineHovered && (
                           <path
-                            d={pathD}
+                            d={subPathD}
                             fill="none"
                             stroke={strokeColor}
                             strokeWidth={4}
                             className="opacity-15"
-                            style={{ transition: 'stroke-dasharray 0.2s' }}
                           />
                         )}
                         <path
-                          d={pathD}
+                          d={subPathD}
                           fill="none"
                           stroke={strokeColor}
                           strokeWidth={isActive ? 1.2 : 0.8}
@@ -341,7 +400,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                         />
                         {isAnimating && (
                           <circle r="2" fill={strokeColor}>
-                            <animateMotion dur={`${1.0 + idx * 0.15}s`} repeatCount="indefinite" path={pathD} />
+                            <animateMotion dur={`${1.0 + idx * 0.15}s`} repeatCount="indefinite" path={subPathD} />
                             <animate attributeName="r" values="1.5;3;1.5" dur="0.8s" repeatCount="indefinite" />
                           </circle>
                         )}
@@ -349,22 +408,23 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     );
                   })}
 
-                  {/* Render the main 'N Parallel Queries' label on the center path (when not hovered) */}
+                  {/* Render the queries count centered badge (when not hovered) */}
                   {!isParallelHovered && (
                     <text
+                      x={midX}
+                      y={midY}
                       fontFamily="JetBrains Mono"
                       fontSize="8px"
                       fontWeight="bold"
                       fill={isActive ? strokeColor : 'rgba(13,13,13,0.3)'}
-                      dy="-4.5"
+                      textAnchor="middle"
+                      dominantBaseline="central"
                       className="select-none pointer-events-none uppercase tracking-widest transition-opacity duration-200"
                       style={{
                         textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
                       }}
                     >
-                      <textPath href={`#tpath-${edgeKey}-${centerIdx}`} startOffset="50%" textAnchor="middle">
-                        {`── ${N} Parallel Queries ──`}
-                      </textPath>
+                      {`${N} Queries`}
                     </text>
                   )}
 
@@ -375,8 +435,8 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     return (
                       <text
                         key={idx}
-                        x={midX}
-                        y={midY + offset}
+                        x={midX + offset}
+                        y={midY}
                         fontFamily="JetBrains Mono"
                         fontSize="7.5px"
                         fontWeight="black"
@@ -393,10 +453,10 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     );
                   })}
 
-                  {/* Hover detector overlay - wide transparent path for easy triggering */}
+                  {/* Hover detector overlay */}
                   {isActive && (
                     <path
-                      d={`M ${fc.x} ${fc.y} C ${fc.x + (tc.x - fc.x) / 2} ${fc.y}, ${fc.x + (tc.x - fc.x) / 2} ${tc.y}, ${tc.x} ${tc.y}`}
+                      d={pathD}
                       fill="none"
                       stroke="transparent"
                       strokeWidth={30}

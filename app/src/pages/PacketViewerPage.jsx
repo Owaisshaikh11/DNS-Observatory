@@ -50,9 +50,9 @@ export default function PacketViewerPage() {
   const hexViewerContainerRef = useRef(null);
 
   // 3. Computed Variables
-  const hops = traceData?.hops || [];
+  const hops = (traceData?.hops || []).filter(h => h.type !== 'ZONE' && h.type !== 'ANSWERS');
   const currentHop = hops.find(h => h.id === selectedHopId) || hops[0];
-  const isVirtualHop = currentHop?.type === 'CLIENT' || currentHop?.type === 'CNAME_REDIRECT';
+  const isVirtualHop = currentHop?.type === 'CLIENT' || currentHop?.type === 'CNAME_REDIRECT' || currentHop?.type === 'ZONE' || currentHop?.type === 'ANSWERS';
   const hasMultipleParallel = currentHop?.parallelQueries && currentHop.parallelQueries.length > 1;
 
   // 4. Handlers
@@ -357,15 +357,20 @@ export default function PacketViewerPage() {
                   <div
                     key={hop.id}
                     onClick={() => setSelectedHopId(hop.id)}
-                    className={`border p-3 font-mono text-[11px] transition-all cursor-pointer flex flex-col gap-1.5 hover:border-ink relative ${isSelected
+                    className={`border p-3 font-mono text-[11px] transition-all cursor-pointer flex flex-col gap-1.5 hover:border-ink relative ${hop.isSubTrace ? 'pl-6 border-l-2 border-dashed border-accent/40 ml-2' : ''} ${isSelected
                       ? 'bg-white border-ink shadow-[2.5px_2.5px_0_0_rgba(13,13,13,1)] z-10 translate-y-[-0.5px]'
                       : 'bg-base border-ink/15 text-ink/75 hover:bg-white'
                       }`}
                   >
                     <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-1.5 font-bold">
+                      <div className="flex items-center gap-1.5 font-bold flex-wrap">
                         <span className="text-accent select-none font-bold text-[9.5px]">HOP 0{idx}</span>
                         <span className="text-ink/35">::</span>
+                        {hop.isSubTrace && (
+                          <span className="text-[7.5px] bg-accent/10 text-accent font-extrabold px-1 border border-accent/20 select-none uppercase tracking-wide leading-none py-0.5 shrink-0">
+                            ↳ GLUE
+                          </span>
+                        )}
                         <span className="truncate max-w-[140px] uppercase text-[11.5px]" title={hop.label}>{hop.label}</span>
                       </div>
                       <span className={`px-1.5 text-[8px] border font-mono font-bold leading-none py-1 select-none shrink-0 ${isVirtual

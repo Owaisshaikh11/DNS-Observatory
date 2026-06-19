@@ -58,7 +58,7 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
   const isCname = hop.type === 'CNAME_REDIRECT';
 
   return (
-    <div ref={cardRef} className="flex flex-col select-none mb-2.5 last:mb-0">
+    <div ref={cardRef} className={`flex flex-col select-none mb-2.5 last:mb-0 ${hop.isSubTrace ? 'pl-4 md:pl-6 border-l border-dashed border-accent/30 ml-2' : ''}`}>
       {/* Card Border Container */}
       <div
         className={`border transition-all duration-200 ${isSelected
@@ -90,8 +90,13 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
 
           {/* Server Details */}
           <div className="flex flex-col gap-0.5 min-w-0">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] select-none">{isClient ? '🖥️' : (hop.geo?.flag || '🌐')}</span>
+              {hop.isSubTrace && (
+                <span className="text-[7px] bg-accent/10 text-accent font-extrabold px-1 border border-accent/20 select-none uppercase tracking-wide leading-none py-0.5 shrink-0">
+                  ↳ GLUE
+                </span>
+              )}
               <span className={`font-display text-[9.5px] font-black uppercase tracking-tight truncate ${isSelected ? 'text-white' : 'text-ink'}`}>
                 {hop.label}
               </span>

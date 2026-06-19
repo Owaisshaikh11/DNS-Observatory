@@ -16,48 +16,67 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
     if (!hop) continue;
 
     const timeStr = `[${(hop.cumulativeMs / 1000).toFixed(3)}s]`;
-    const hopDomain = hop.queryDomain || domVal;
+    const prefix = hop.isSubTrace ? `  [GLUE:${hop.subTraceFor}] ` : '';
 
     if (hop.type === 'CLIENT') {
-      logLines.push({ time: timeStr, source: 'CLIENT', text: `Initiating trace query for "${hopDomain.toUpperCase()}" (Record Type: ${recTypeVal})` });
-      if (recTypeVal === 'ALL') {
+      logLines.push({ time: timeStr, source: 'CLIENT', text: `${prefix}Initiating trace query for "${hop.queryDomain?.toUpperCase() || domVal.toUpperCase()}" (Record Type: ${recTypeVal})` });
+      if (recTypeVal === 'ALL' && !hop.isSubTrace) {
         logLines.push({ time: timeStr, source: 'RFC-8482', text: `Notice: ANY query deprecated by RFC 8482. Resolving types A, AAAA, MX, TXT, NS in parallel.` });
       }
-      logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Local Resolver at ${hop.ip}` });
     } else if (hop.type === 'LOCAL') {
-      if (!hop.response) {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Connection to Local DNS server failed. Bypassing local resolution.` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Querying DNS Root nameserver hints directly...` });
-      } else {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking local cache & zone databases...` });
+      if (hop.response) {
         const answersList = hop.response.answers || [];
-        const isAuthoritative = hop.response.isAuthoritative || false;
+        const isAuthoritative = hop.response.flags?.includes('AA');
         if (isAuthoritative && answersList.length > 0) {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache hit! Found authoritative local zone mapping.` });
-          logLines.push({ time: timeStr, source: 'CLIENT', text: `Received response payload from local resolver: ${answersList.length} records resolved.` });
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `${prefix}Local DNS Cache hit! Found authoritative local zone mapping.` });
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `${prefix}Returned ${answersList.length} local records.` });
         } else {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache miss. Querying DNS Root nameserver hints...` });
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `${prefix}Local custom DNS cache miss. Starting iterative resolution.` });
         }
-      }
-    } else if (hop.type === 'ROOT') {
-      logLines.push({ time: timeStr, source: 'ROOT', text: `Querying Root Authority: ${hop.label} (${hop.ip})` });
-      logLines.push({ time: timeStr, source: 'ROOT', text: `Received delegation referral (RCODE: ${hop.response?.rcode || 'NOERROR'}). Found ${hop.response?.authority?.length || 13} TLD servers.` });
-    } else if (hop.type === 'TLD') {
-      logLines.push({ time: timeStr, source: 'TLD', text: `Querying TLD Server: ${hop.label} (${hop.ip})` });
-      logLines.push({ time: timeStr, source: 'TLD', text: `Received delegation referral (RCODE: ${hop.response?.rcode || 'NOERROR'}). Found ${hop.response?.authority?.length || 4} authoritative servers.` });
-    } else if (hop.type === 'AUTH') {
-      logLines.push({ time: timeStr, source: 'AUTH', text: `Querying Authoritative Server: ${hop.label} (${hop.ip})` });
-      const rcode = hop.response?.rcode || 'NOERROR';
-      const answersCount = hop.response?.answers?.length || 0;
-      if (rcode === 'NXDOMAIN') {
-        logLines.push({ time: timeStr, source: 'AUTH', text: `NXDOMAIN response code returned. Requested domain target does not exist!` });
       } else {
-        logLines.push({ time: timeStr, source: 'AUTH', text: `Final answer received (RCODE: ${rcode}, AA Flag: ${hop.response?.flags?.includes('AA') ? '1' : '0'}). Found ${answersCount} answers.` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. [Notice: Caching bypassed to demonstrate full resolution path]. Retransmitting payload to Client Stub.` });
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `${prefix}Local custom DNS unreachable. Starting iterative resolution.` });
+      }
+    } else if (hop.type === 'ZONE') {
+      logLines.push({ time: timeStr, source: 'RESOLVER', text: `${prefix}Delegation check: transitioning to zone "${hop.label}"` });
+    } else if (hop.type === 'ROOT' || hop.type === 'TLD' || hop.type === 'AUTH') {
+      const source = hop.type;
+      if (hop.success !== false && hop.response) {
+        const rcode = hop.response.rcode;
+        const latency = hop.latencyMs;
+        const answersCount = hop.response.answers?.length || 0;
+        const nsCount = hop.response.authority?.length || 0;
+        const additionalCount = hop.response.additional?.length || 0;
+
+        let detail = `RCODE: ${rcode}, Latency: ${latency}ms`;
+        if (rcode === 'NXDOMAIN') {
+          detail += ` · Requested name does not exist.`;
+        } else if (answersCount > 0) {
+          detail += ` · Found ${answersCount} answer records.`;
+        } else if (nsCount > 0) {
+          detail += ` · Referred to ${nsCount} nameservers (Glue: ${additionalCount}).`;
+        }
+
+        logLines.push({
+          time: timeStr,
+          source,
+          text: `${prefix}Query sent to ${hop.server} (${hop.ip}) -> ${detail}`
+        });
+      } else {
+        logLines.push({
+          time: timeStr,
+          source,
+          text: `${prefix}Query to ${hop.server} (${hop.ip}) failed/timed out: ${hop.description}`
+        });
       }
     } else if (hop.type === 'CNAME_REDIRECT') {
-      logLines.push({ time: timeStr, source: 'CNAME', text: `CNAME alias redirection: "${hop.cnameFrom.toUpperCase()}" -> "${hop.cnameTo.toUpperCase()}"` });
-      logLines.push({ time: timeStr, source: 'CLIENT', text: `Redirecting resolver chain to target host.` });
+      logLines.push({ time: timeStr, source: 'CNAME', text: `${prefix}CNAME redirect: "${hop.cnameFrom.toUpperCase()}" -> "${hop.cnameTo.toUpperCase()}"` });
+    } else if (hop.type === 'ANSWERS') {
+      const answersList = hop.answers || [];
+      logLines.push({
+        time: timeStr,
+        source: 'RESOLVER',
+        text: `${prefix}Resolution complete! Loaded answers: ${answersList.map(a => `${a.typeName} ${a.value}`).join(', ') || 'No answers returned.'}`
+      });
     }
   }
 
@@ -979,19 +998,24 @@ export default function VisualizerPage() {
 
               {/* Compact Waterfall List */}
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-0 scroll-smooth">
-                {hops.map((hop, i) => (
-                  <HopCard
-                    key={hop.id}
-                    hop={hop}
-                    index={i}
-                    totalLatency={totalLatency}
-                    isSelected={selectedHop === hop.id || (!selectedHop && activeStep === i)}
-                    onSelect={setSelectedHop}
-                    secondsElapsed={secondsElapsed}
-                    isReached={i <= activeStep}
-                    compact={true}
-                  />
-                ))}
+                {hops
+                  .filter(h => h.type !== 'ZONE' && h.type !== 'ANSWERS')
+                  .map((hop) => {
+                    const originalIdx = hops.findIndex(x => x.id === hop.id);
+                    return (
+                      <HopCard
+                        key={hop.id}
+                        hop={hop}
+                        index={originalIdx}
+                        totalLatency={totalLatency}
+                        isSelected={selectedHop === hop.id || (!selectedHop && activeStep === originalIdx)}
+                        onSelect={setSelectedHop}
+                        secondsElapsed={secondsElapsed}
+                        isReached={originalIdx <= activeStep}
+                        compact={true}
+                      />
+                    );
+                  })}
               </div>
             </div>
           )}

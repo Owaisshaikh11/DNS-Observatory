@@ -19,6 +19,7 @@ const MAX_CACHE_SIZE = 500;
 // Map preserves insertion order, which gives us LRU eviction for free:
 // when the map is full, we delete the first (oldest) entry.
 const geoCache = new Map();
+const pendingGeoLookups = new Map();
 
 const PRIVATE_IP_RE = [
   /^127\./,           // loopback
@@ -76,52 +77,63 @@ async function lookupGeoIp(ip) {
     return cached;
   }
 
-  // ── ip-api.com lookup ─────────────────────────────────────────────────────
-  try {
-    const response = await fetch(
-      `http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org`,
-      { signal: AbortSignal.timeout(3000) }
-    );
-
-    if (!response.ok) {
-      throw new Error(`ip-api.com HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.status !== 'success') {
-      throw new Error(`ip-api.com failed for ${ip}: ${data.message || 'unknown reason'}`);
-    }
-
-    const result = {
-      flag:        countryCodeToFlag(data.countryCode),
-      org:         data.org || data.isp || 'Unknown',
-      country:     data.country || 'Unknown',
-      city:        data.city || null,
-      countryCode: data.countryCode || null,
-      isp:         data.isp || null,
-    };
-
-    // ── LRU eviction ──────────────────────────────────────────────────────
-    if (geoCache.size >= MAX_CACHE_SIZE) {
-      const oldestKey = geoCache.keys().next().value;
-      geoCache.delete(oldestKey);
-    }
-    geoCache.set(ip, result);
-
-    return result;
-
-  } catch (err) {
-    logger.warn({ err, ip }, `GeoIP lookup failed for ${ip}: ${err.message}`);
-    return {
-      flag:        '🌐',
-      org:         'Unknown',
-      country:     'Unknown',
-      city:        null,
-      countryCode: null,
-      isp:         null,
-    };
+  // ── Deduplicate concurrent requests for the same IP ──────────────────────
+  if (pendingGeoLookups.has(ip)) {
+    return pendingGeoLookups.get(ip);
   }
+
+  const promise = (async () => {
+    try {
+      const response = await fetch(
+        `http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org`,
+        { signal: AbortSignal.timeout(3000) }
+      );
+
+      if (!response.ok) {
+        throw new Error(`ip-api.com HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.status !== 'success') {
+        throw new Error(`ip-api.com failed for ${ip}: ${data.message || 'unknown reason'}`);
+      }
+
+      const result = {
+        flag:        countryCodeToFlag(data.countryCode),
+        org:         data.org || data.isp || 'Unknown',
+        country:     data.country || 'Unknown',
+        city:        data.city || null,
+        countryCode: data.countryCode || null,
+        isp:         data.isp || null,
+      };
+
+      // ── LRU eviction ──────────────────────────────────────────────────────
+      if (geoCache.size >= MAX_CACHE_SIZE) {
+        const oldestKey = geoCache.keys().next().value;
+        geoCache.delete(oldestKey);
+      }
+      geoCache.set(ip, result);
+
+      return result;
+
+    } catch (err) {
+      logger.warn({ err, ip }, `GeoIP lookup failed for ${ip}: ${err.message}`);
+      return {
+        flag:        '🌐',
+        org:         'Unknown',
+        country:     'Unknown',
+        city:        null,
+        countryCode: null,
+        isp:         null,
+      };
+    } finally {
+      pendingGeoLookups.delete(ip);
+    }
+  })();
+
+  pendingGeoLookups.set(ip, promise);
+  return promise;
 }
 
 module.exports = { lookupGeoIp };
