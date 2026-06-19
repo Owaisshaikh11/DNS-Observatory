@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const net = require("net");
+const pinoHttp = require("pino-http");
+const logger = require("../lib/logger");
 const {
   dynamicSubdomains,
   addDynamicSubdomain,
@@ -12,6 +14,7 @@ const { getRecords } = require("../lib/record-manager");
 function startHttpApi(port) {
   const app = express();
 
+  app.use(pinoHttp({ logger }));
   app.use(express.json());
   app.use(cors());
 
@@ -57,7 +60,7 @@ function startHttpApi(port) {
       );
       res.json({ success: true, domain: domainName, isPersistent: persistent });
     } catch (error) {
-      console.error("Error adding subdomain:", error);
+      req.log.error({ err: error, subdomain: subdomainValue, domain: domainValue }, "Error adding subdomain");
       res.status(500).json({ error: "Failed to add subdomain" });
     }
   });
@@ -75,7 +78,7 @@ function startHttpApi(port) {
       const removed = removeDynamicSubdomain(subdomainValue, domainValue);
       res.status(removed ? 200 : 404).json({ success: removed });
     } catch (error) {
-      console.error("Error removing subdomain:", error);
+      req.log.error({ err: error, subdomain: subdomainValue, domain: domainValue }, "Error removing subdomain");
       res.status(500).json({ error: "Failed to remove subdomain" });
     }
   });
@@ -84,13 +87,13 @@ function startHttpApi(port) {
     try {
       res.json(getRecords());
     } catch (error) {
-      console.error("Error retrieving records:", error);
+      req.log.error({ err: error }, "Error retrieving records");
       res.status(500).json({ error: "Failed to retrieve records" });
     }
   });
 
   return app.listen(port, () => {
-    console.log(`HTTP API server running on port ${port}`);
+    logger.info(`HTTP API server running on port ${port}`);
   });
 }
 

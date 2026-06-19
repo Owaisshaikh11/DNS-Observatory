@@ -1,5 +1,6 @@
 const dgram = require("dgram");
 const { dnsConfig } = require("../config/dns-config");
+const logger = require("./logger");
 
 /**
  * Forwards a raw DNS query buffer to the configured upstream DNS servers.
@@ -13,7 +14,7 @@ function forwardQuery(msg) {
   const { upstreamServers, forwardTimeout } = dnsConfig;
 
   if (!upstreamServers || upstreamServers.length === 0) {
-    console.warn("No upstream DNS servers configured.");
+    logger.warn("No upstream DNS servers configured.");
     return Promise.resolve(null);
   }
 
@@ -52,7 +53,7 @@ function forwardQuery(msg) {
         socket = dgram.createSocket("udp4");
 
         socket.on("error", (err) => {
-          console.error(`Upstream DNS server ${host}:${port} socket error: ${err.message}`);
+          logger.error({ err, upstream: `${host}:${port}` }, `Upstream DNS server ${host}:${port} socket error: ${err.message}`);
           tryNext();
         });
 
@@ -62,18 +63,18 @@ function forwardQuery(msg) {
         });
 
         timeoutId = setTimeout(() => {
-          console.warn(`Upstream DNS server ${host}:${port} timed out after ${forwardTimeout}ms`);
+          logger.warn({ upstream: `${host}:${port}`, timeout: forwardTimeout }, `Upstream DNS server ${host}:${port} timed out after ${forwardTimeout}ms`);
           tryNext();
         }, forwardTimeout);
 
         socket.send(msg, 0, msg.length, port, host, (err) => {
           if (err) {
-            console.error(`Failed to send query to upstream DNS server ${host}:${port}: ${err.message}`);
+            logger.error({ err, upstream: `${host}:${port}` }, `Failed to send query to upstream DNS server ${host}:${port}: ${err.message}`);
             tryNext();
           }
         });
       } catch (err) {
-        console.error(`Failed to create socket for upstream DNS server ${host}:${port}: ${err.message}`);
+        logger.error({ err, upstream: `${host}:${port}` }, `Failed to create socket for upstream DNS server ${host}:${port}: ${err.message}`);
         tryNext();
       }
     }

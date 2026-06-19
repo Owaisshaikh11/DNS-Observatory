@@ -12,6 +12,8 @@
  * ip-api.com free tier allows ~45 requests/minute — fine for interactive use.
  */
 
+const logger = require('./logger');
+
 const MAX_CACHE_SIZE = 500;
 
 // Map preserves insertion order, which gives us LRU eviction for free:
@@ -110,7 +112,7 @@ async function lookupGeoIp(ip) {
     return result;
 
   } catch (err) {
-    console.warn(`GeoIP lookup failed for ${ip}: ${err.message}`);
+    logger.warn({ err, ip }, `GeoIP lookup failed for ${ip}: ${err.message}`);
     return {
       flag:        '🌐',
       org:         'Unknown',

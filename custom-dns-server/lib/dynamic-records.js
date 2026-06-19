@@ -4,6 +4,7 @@ const {
   removeLocalRecord,
   setLocalRecord,
 } = require("./record-manager");
+const logger = require("./logger");
 
 // In-memory store for live dynamic subdomains (sub.domain → metadata)
 const dynamicSubdomains = new Map();
@@ -11,7 +12,7 @@ const dynamicSubdomains = new Map();
 // No-op on startup — dynamic records are ephemeral and live only in memory
 function loadDynamicSubdomains() {
   dynamicSubdomains.clear();
-  console.log("Dynamic subdomains initialized (in-memory only)");
+  logger.info("Dynamic subdomains initialized (in-memory only)");
 }
 
 // Registers a new dynamic A record for sub.domain pointing to ip

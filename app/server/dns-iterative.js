@@ -20,6 +20,7 @@
  */
 
 const dgram = require('dgram');
+const logger = require('./logger');
 const { buildDnsQuery } = require('./dns-query-writer');
 const { parseDnsResponse } = require('./dns-response-parser');
 const { parseQuery } = require('../../custom-dns-server/lib/dns-parser');
@@ -115,7 +116,7 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
     queryPacket = parseQuery(query);
     queryPacket.rawHex = queryHex;
   } catch (err) {
-    console.error(`[Iterative] Failed to parse request query buffer:`, err.message);
+    logger.error({ err }, `[Iterative] Failed to parse request query buffer: ${err.message}`);
   }
 
   const start = Date.now();

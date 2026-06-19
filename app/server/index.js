@@ -21,6 +21,8 @@ const path = require('path');
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
+const pinoHttp = require('pino-http');
+const logger = require('./logger');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
 
@@ -53,6 +55,7 @@ async function start() {
   const app = express();
   const httpServer = http.createServer(app);
 
+  app.use(pinoHttp({ logger }));
   app.use(cors({ origin: CORS_ORIGINS }));
   app.use(express.json());
 
@@ -86,13 +89,13 @@ async function start() {
       return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
     }
 
-    console.log(`[Trace] ${cleanDomain} ${cleanType}`);
+    req.log.info({ domain: cleanDomain, recordType: cleanType }, `Initiating trace for ${cleanDomain} (${cleanType})`);
 
     try {
       const trace = await iterativeTrace(cleanDomain, cleanType);
       res.json(trace);
     } catch (err) {
-      console.error(`[Trace] Error for ${cleanDomain}:`, err.message);
+      req.log.error({ err, domain: cleanDomain, recordType: cleanType }, `Error executing trace for ${cleanDomain}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -111,13 +114,13 @@ async function start() {
       return res.status(400).json({ error: 'domain is required' });
     }
 
-    console.log(`[Benchmark] ${domain.trim()} ${type}`);
+    req.log.info({ domain: domain.trim(), recordType: type }, `Initiating benchmark for ${domain.trim()} (${type})`);
 
     try {
       const result = await benchmarkResolvers(domain.trim(), type);
       res.json(result);
     } catch (err) {
-      console.error('[Benchmark] Error:', err.message);
+      req.log.error({ err, domain: domain.trim(), recordType: type }, `Error executing benchmark for ${domain.trim()}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -153,13 +156,13 @@ async function start() {
       client.send(queryBuffer, 5354, '127.0.0.1', (err) => {
         client.close();
         if (err) {
-          console.error('[Packet Engine] Failed to inject mock query:', err.message);
+          req.log.error({ err, domain: cleanDomain, recordType: cleanType }, 'Failed to inject mock query');
           return res.status(500).json({ error: `Failed to inject query: ${err.message}` });
         }
         res.json({ success: true, message: `Injected UDP query to port 5354 for ${cleanDomain} (${cleanType})` });
       });
     } catch (err) {
-      console.error('[Packet Engine] Injection build failed:', err.message);
+      req.log.error({ err, domain: cleanDomain, recordType: cleanType }, 'Injection build failed');
       res.status(500).json({ error: err.message });
     }
   });
@@ -168,22 +171,22 @@ async function start() {
 
   // ── Start listening ────────────────────────────────────────────────────────
   httpServer.listen(API_PORT, () => {
-    console.log(`[API] Visualizer backend running at http://localhost:${API_PORT}`);
-    console.log(`[DNS] Custom DNS server running on UDP port ${DNS_PORT}`);
+    logger.info(`Visualizer backend running at http://localhost:${API_PORT}`);
+    logger.info(`Custom DNS server running on UDP port ${DNS_PORT}`);
   });
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   process.on('SIGINT', () => {
-    console.log('\n[Shutdown] Closing servers...');
+    logger.info('Closing servers...');
     dnsServer.close();
     httpServer.close(() => {
-      console.log('[Shutdown] Done. Goodbye!');
+      logger.info('Servers closed. Goodbye!');
       process.exit(0);
     });
   });
 }
 
 start().catch((err) => {
-  console.error('[Fatal] Failed to start:', err.message);
+  logger.fatal({ err }, 'Failed to start Visualizer backend');
   process.exit(1);
 });

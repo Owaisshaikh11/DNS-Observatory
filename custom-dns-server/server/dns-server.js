@@ -1,5 +1,6 @@
 const dgram = require("dgram");
 const { EventEmitter } = require("events");
+const logger = require("../lib/logger");
 const { parseQuery, createResponse, createErrorResponse } = require("../lib/dns-parser");
 const { getRecordsForDomain, isLocalDomain } = require("../lib/dns-resolver");
 const { CLASS_IN } = require("../lib/types");
@@ -14,7 +15,7 @@ function startDnsUdpServer(port = 53) {
   server.dnsEvents = dnsEvents;
 
   server.on("error", (err) => {
-    console.error(`DNS server error: ${err.message}`);
+    logger.error({ err }, `DNS server socket error: ${err.message}`);
   });
 
   server.on("message", async (msg, rinfo) => {
@@ -24,55 +25,57 @@ function startDnsUdpServer(port = 53) {
     try {
       query = parseQuery(msg);
     } catch (err) {
-      console.error(
+      logger.warn(
+        { err, remote: `${rinfo.address}:${rinfo.port}` },
         `DNS Query parsing failed from ${rinfo.address}:${rinfo.port} - ${err.message}`
       );
       const txId = msg.length >= 2 ? msg.readUInt16BE(0) : 0;
       const response = createErrorResponse(txId, 1); // RCODE 1 = FORMERR
       server.send(response, rinfo.port, rinfo.address, (sendErr) => {
-        if (sendErr) console.error("Error sending FORMERR response:", sendErr);
+        if (sendErr) logger.error({ err: sendErr }, "Error sending FORMERR response");
       });
       return;
     }
 
     try {
       if (!query.questions || query.questions.length === 0) {
-        console.warn("Received DNS Query with no questions — ignoring.");
+        logger.warn({ remote: `${rinfo.address}:${rinfo.port}` }, "Received DNS Query with no questions — ignoring.");
         return;
       }
 
       const question = query.questions[0];
 
-      console.log(
+      logger.info(
+        { domain: question.name, type: question.type, remote: `${rinfo.address}:${rinfo.port}` },
         `DNS Query: ${question.name} (Type ${question.type}) from ${rinfo.address}:${rinfo.port}`
       );
 
       if (question.class !== CLASS_IN) {
         const response = createResponse(query, []);
         server.send(response, rinfo.port, rinfo.address, (sendErr) => {
-          if (sendErr) console.error("Error sending DNS response:", sendErr);
+          if (sendErr) logger.error({ err: sendErr }, "Error sending DNS response for non-IN class");
         });
         return;
       }
 
       // Forward non-local queries to upstream DNS servers
       if (dnsConfig.forwardEnabled && !isLocalDomain(question.name)) {
-        console.log(`Forwarding query for ${question.name} to upstream servers`);
+        logger.debug({ domain: question.name }, `Forwarding query for ${question.name} to upstream servers`);
         const responseMsg = await forwardQuery(msg);
 
         if (responseMsg) {
           server.send(responseMsg, rinfo.port, rinfo.address, (sendErr) => {
-            if (sendErr) console.error("Error sending forwarded DNS response:", sendErr);
+            if (sendErr) logger.error({ err: sendErr }, "Error sending forwarded DNS response");
           });
           // Decode response RCODE from raw DNS response header (byte index 2-3)
           const responseFlags = responseMsg.length >= 4 ? responseMsg.readUInt16BE(2) : 0;
           const rcode = responseFlags & 0x000f;
           _emitQuery(dnsEvents, question, rinfo, rcode, startTime, false, msg, responseMsg);
         } else {
-          console.warn(`Upstream resolution failed for ${question.name}. Sending SERVFAIL.`);
+          logger.warn({ domain: question.name }, `Upstream resolution failed for ${question.name}. Sending SERVFAIL.`);
           const response = createResponse(query, [], 2); // RCODE 2 = SERVFAIL
           server.send(response, rinfo.port, rinfo.address, (sendErr) => {
-            if (sendErr) console.error("Error sending SERVFAIL response:", sendErr);
+            if (sendErr) logger.error({ err: sendErr }, "Error sending SERVFAIL response");
           });
           _emitQuery(dnsEvents, question, rinfo, 2, startTime, false, msg, response);
         }
@@ -85,24 +88,24 @@ function startDnsUdpServer(port = 53) {
       const rcode = isLocal ? 0 : 3; // RCODE 3 = NXDOMAIN for unknown domains
       const response = createResponse(query, answers, rcode);
       server.send(response, rinfo.port, rinfo.address, (sendErr) => {
-        if (sendErr) console.error("Error sending DNS response:", sendErr);
+        if (sendErr) logger.error({ err: sendErr }, "Error sending DNS response");
       });
 
       _emitQuery(dnsEvents, question, rinfo, rcode, startTime, isLocal, msg, response);
     } catch (err) {
-      console.error("Error resolving DNS query:", err);
+      logger.error({ err, domain: query?.questions?.[0]?.name }, "Error resolving DNS query");
       try {
         const response = createResponse(query, [], 2); // RCODE 2 = SERVFAIL
         server.send(response, rinfo.port, rinfo.address, (sendErr) => {
-          if (sendErr) console.error("Error sending SERVFAIL response:", sendErr);
+          if (sendErr) logger.error({ err: sendErr }, "Error sending SERVFAIL response after catch");
         });
       } catch (innerErr) {
-        console.error("Failed to build/send SERVFAIL response:", innerErr);
+        logger.error({ err: innerErr }, "Failed to build/send SERVFAIL response after catch");
       }
     }
   });
 
-  server.bind(port, () => console.log(`DNS server running on port ${port}`));
+  server.bind(port, () => logger.info(`DNS server running on port ${port}`));
   return server;
 }
 

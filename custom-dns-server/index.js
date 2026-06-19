@@ -1,4 +1,5 @@
 const path = require("path");
+const logger = require("./lib/logger");
 const { startDnsUdpServer } = require("./server/dns-server");
 const { startHttpApi } = require("./api/http-api");
 const { loadRecords } = require("./lib/record-manager");
@@ -23,11 +24,11 @@ async function startServer() {
       // Graceful shutdown
       dnsServer.close();
       apiServer.close();
-      console.log("DNS server shut down 🫡🫡");
+      logger.info("DNS server shut down 🫡🫡");
       process.exit();
     });
   } catch (error) {
-    console.error("Failed to start server:", error);
+    logger.error({ err: error }, "Failed to start server");
     process.exit(1);
   }
 }

@@ -1,4 +1,5 @@
 const fs = require("fs");
+const logger = require("./logger");
 
 // In-memory record stores
 const cache = new Map();
@@ -50,13 +51,13 @@ function loadRecords(filePath) {
   try {
     const raw = fs.readFileSync(filePath, "utf8");
     loaded = normalizeRecordMap(JSON.parse(raw));
-    console.log(`Loaded DNS records from ${filePath}`);
+    logger.info({ path: filePath }, `Loaded DNS records from ${filePath}`);
   } catch (err) {
     if (err.code === "ENOENT") {
       fs.writeFileSync(filePath, JSON.stringify(loaded, null, 2));
-      console.log(`Created default records at ${filePath}`);
+      logger.info({ path: filePath }, `Created default records at ${filePath}`);
     } else {
-      console.error(`Error loading records: ${err.message}`);
+      logger.error({ err, path: filePath }, `Error loading records: ${err.message}`);
     }
   }
   fileRecords = loaded;
@@ -76,9 +77,9 @@ function saveRecords(filePath) {
       }
     }
     fs.writeFileSync(filePath, JSON.stringify(persistentRecords, null, 2));
-    console.log(`Saved DNS records to ${filePath}`);
+    logger.info({ path: filePath }, `Saved DNS records to ${filePath}`);
   } catch (err) {
-    console.error(`Error saving records: ${err.message}`);
+    logger.error({ err, path: filePath }, `Error saving records: ${err.message}`);
   }
 }
 
