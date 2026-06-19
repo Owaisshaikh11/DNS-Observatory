@@ -39,9 +39,8 @@ function ErrorTelemetry({ isPanic }) {
 
   return (
     <div
-      className={`absolute inset-0 pointer-events-none overflow-hidden z-0 flex flex-col justify-end p-8 font-mono text-[10px] leading-tight transition-colors duration-150 ${
-        isPanic ? 'opacity-60 text-accent font-bold drop-shadow-md' : 'opacity-25'
-      }`}
+      className={`absolute inset-0 pointer-events-none overflow-hidden z-0 flex flex-col justify-end p-8 font-mono text-[10px] leading-tight transition-colors duration-150 ${isPanic ? 'opacity-60 text-accent font-bold drop-shadow-md' : 'opacity-25'
+        }`}
     >
       {/* Fade mask at top */}
       <div className="absolute top-0 left-0 w-full h-32 bg-linear-to-b from-base to-transparent z-10" />
@@ -59,30 +58,30 @@ function ErrorTelemetry({ isPanic }) {
 function Structural404({ mousePos, isPanic }) {
   // Spring configs — heavier = more mechanical lag
   const spFast = { damping: 30, stiffness: 200 };
-  const spMed  = { damping: 40, stiffness: 120 };
+  const spMed = { damping: 40, stiffness: 120 };
   const spSlow = { damping: 50, stiffness: 80 };
 
   // Digit 1: '4'
   const n1xFast = useSpring(mousePos.x * -30, spFast);
   const n1yFast = useSpring(mousePos.y * -30, spFast);
-  const n1xMed  = useSpring(mousePos.x * -50, spMed);
-  const n1yMed  = useSpring(mousePos.y * -50, spMed);
+  const n1xMed = useSpring(mousePos.x * -50, spMed);
+  const n1yMed = useSpring(mousePos.y * -50, spMed);
   const n1xSlow = useSpring(mousePos.x * -70, spSlow);
   const n1ySlow = useSpring(mousePos.y * -70, spSlow);
 
   // Digit 2: '0'
   const n2xFast = useSpring(mousePos.x * 15, spFast);
   const n2yFast = useSpring(mousePos.y * 15, spFast);
-  const n2xMed  = useSpring(mousePos.x * 30, spMed);
-  const n2yMed  = useSpring(mousePos.y * 30, spMed);
+  const n2xMed = useSpring(mousePos.x * 30, spMed);
+  const n2yMed = useSpring(mousePos.y * 30, spMed);
   const n2xSlow = useSpring(mousePos.x * 45, spSlow);
   const n2ySlow = useSpring(mousePos.y * 45, spSlow);
 
   // Digit 3: '4'
   const n3xFast = useSpring(mousePos.x * 45, spFast);
   const n3yFast = useSpring(mousePos.y * 45, spFast);
-  const n3xMed  = useSpring(mousePos.x * 65, spMed);
-  const n3yMed  = useSpring(mousePos.y * 65, spMed);
+  const n3xMed = useSpring(mousePos.x * 65, spMed);
+  const n3yMed = useSpring(mousePos.y * 65, spMed);
   const n3xSlow = useSpring(mousePos.x * 85, spSlow);
   const n3ySlow = useSpring(mousePos.y * 85, spSlow);
 
@@ -126,23 +125,23 @@ function Structural404({ mousePos, isPanic }) {
         <RenderDigit
           digit="4"
           xSlow={n1xSlow} ySlow={n1ySlow}
-          xMed={n1xMed}   yMed={n1yMed}
-          xFast={n1xFast}  yFast={n1yFast}
-          zIndex="z-10"    extraClasses="md:mr-[-4vw] md:-mt-[8vw]"
+          xMed={n1xMed} yMed={n1yMed}
+          xFast={n1xFast} yFast={n1yFast}
+          zIndex="z-10" extraClasses="md:mr-[-4vw] md:-mt-[8vw]"
         />
         <RenderDigit
           digit="0"
           xSlow={n2xSlow} ySlow={n2ySlow}
-          xMed={n2xMed}   yMed={n2yMed}
-          xFast={n2xFast}  yFast={n2yFast}
-          zIndex="z-20"    extraClasses="md:mt-[4vw]"
+          xMed={n2xMed} yMed={n2yMed}
+          xFast={n2xFast} yFast={n2yFast}
+          zIndex="z-20" extraClasses="md:mt-[4vw]"
         />
         <RenderDigit
           digit="4"
           xSlow={n3xSlow} ySlow={n3ySlow}
-          xMed={n3xMed}   yMed={n3yMed}
-          xFast={n3xFast}  yFast={n3yFast}
-          zIndex="z-30"    extraClasses="md:ml-[-4vw] md:mt-[16vw]"
+          xMed={n3xMed} yMed={n3yMed}
+          xFast={n3xFast} yFast={n3yFast}
+          zIndex="z-30" extraClasses="md:ml-[-4vw] md:mt-[16vw]"
         />
       </div>
     </div>
@@ -197,9 +196,8 @@ export default function NotFoundPage() {
 
   return (
     <div
-      className={`w-full h-screen flex flex-col relative overflow-hidden selection:bg-accent selection:text-base transition-colors duration-300 z-10 ${
-        isPanic ? 'bg-accent/5' : 'bg-base'
-      }`}
+      className={`w-full h-screen flex flex-col relative overflow-hidden selection:bg-accent selection:text-base transition-colors duration-300 z-10 ${isPanic ? 'bg-accent/5' : 'bg-base'
+        }`}
     >
       <InteractiveGrid />
       <ErrorTelemetry isPanic={isPanic} />
@@ -214,11 +212,7 @@ export default function NotFoundPage() {
             Resolution Lab
           </span>
         </div>
-        <div className="flex flex-col items-end gap-2 font-mono text-[10px] uppercase">
-          <div className="opacity-50 text-right hidden md:block">
-            Functional Brutalism Protocol
-          </div>
-        </div>
+
       </header>
 
       {/* ── Falling 404 Hero ────────────────────────────────────────── */}
@@ -229,11 +223,10 @@ export default function NotFoundPage() {
         initial={{ y: 100 }}
         animate={{ y: 0 }}
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.5 }}
-        className={`w-full border-t border-ink bg-base flex flex-col z-20 shrink-0 transition-all duration-300 ${
-          isPanic
-            ? 'border-t-4 border-t-accent shadow-[0_-4px_0_0_rgba(255,77,0,1)]'
-            : 'shadow-[0_-20px_60px_rgba(13,13,13,0.15)]'
-        }`}
+        className={`w-full border-t border-ink bg-base flex flex-col z-20 shrink-0 transition-all duration-300 ${isPanic
+          ? 'border-t-4 border-t-accent shadow-[0_-4px_0_0_rgba(255,77,0,1)]'
+          : 'shadow-[0_-20px_60px_rgba(13,13,13,0.15)]'
+          }`}
       >
         {/* Status strip */}
         <div className="w-full px-6 md:px-12 py-3 border-b border-ink/10 bg-ink/5 font-mono text-[10px] uppercase flex justify-between items-center opacity-60">
