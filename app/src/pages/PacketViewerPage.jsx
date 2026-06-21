@@ -144,6 +144,7 @@ export default function PacketViewerPage() {
   let activeResponsePacket = null;
   let byteLength = 0;
   let isTimeout = false;
+  let resolvedOverTcp = false;
 
   if (currentHop) {
     if (hasMultipleParallel && activeParallelType) {
@@ -153,11 +154,13 @@ export default function PacketViewerPage() {
         activeResponsePacket = sub.responsePacket;
         isTimeout = sub.rcode === 'TIMEOUT';
         byteLength = sub.byteLength;
+        resolvedOverTcp = sub.resolvedOverTcp || false;
       }
     } else {
       activeQueryPacket = currentHop.queryPacket;
       activeResponsePacket = currentHop.response;
       byteLength = currentHop.byteLength || 0;
+      resolvedOverTcp = currentHop.resolvedOverTcp || false;
     }
   }
 
@@ -463,7 +466,7 @@ export default function PacketViewerPage() {
                   Virtual Hop: {currentHop.type}
                 </span>
                 <p className="text-[11px] text-ink/65 uppercase leading-relaxed font-semibold">
-                  This step representing a {currentHop.type === 'CLIENT' ? 'client stub setup' : 'cname redirection'} is handled internally. No physical UDP wire packets were generated or transmitted.
+                  This step representing a {currentHop.type === 'CLIENT' ? 'client stub setup' : 'cname redirection'} is handled internally. No physical wire packets were generated or transmitted.
                 </p>
               </div>
             </div>
@@ -479,7 +482,8 @@ export default function PacketViewerPage() {
                   traceData.timestamp,
                   currentHop.ip,
                   currentHop.port,
-                  activeTab
+                  activeTab,
+                  resolvedOverTcp
                 )}
 
                 {/* 2. DNS Protocol Node Tree */}
@@ -489,7 +493,8 @@ export default function PacketViewerPage() {
                   openNodes,
                   toggleNode,
                   hoverBytes,
-                  isTimeout
+                  isTimeout,
+                  resolvedOverTcp
                 )}
 
               </div>
@@ -547,7 +552,7 @@ const getAlgorithmDescription = (algNum, name) => {
 // ── DISSECTOR NODES RENDERING ──────────────────────────────────────────────
 
 // Render Frame Node (Metadata details)
-function renderFrameNode(packet, timestamp, ip, port, tab) {
+function renderFrameNode(packet, timestamp, ip, port, tab, resolvedOverTcp) {
   if (!packet) return null;
   const date = new Date(timestamp || Date.now());
   const timeString = `${date.toISOString()}`;
@@ -562,14 +567,14 @@ function renderFrameNode(packet, timestamp, ip, port, tab) {
       </div>
       <div className="pl-4 text-[10px] text-ink/50 flex flex-col gap-0.5 mt-1 font-medium select-text border-b border-ink/5 pb-2">
         <span>• Arrival Time: {timeString}</span>
-        <span>• Protocols in Frame: UDP ({port || 53}) &rarr; DNS</span>
+        <span>• Protocols in Frame: {resolvedOverTcp ? 'TCP' : 'UDP'} ({port || 53}) &rarr; DNS</span>
         <span>• Name Server Host Target: {ip || '127.0.0.1'}:{port || 53}</span>
         <span>• Capture Size: {bytesCount} bytes ({bytesCount * 8} bits)</span>
       </div>
       <div className="mt-2.5 p-2.5 border border-dashed border-ink/20 bg-ink/[0.02] font-mono text-[9px] text-ink/65 flex items-start gap-2 select-none leading-relaxed">
         <Info className="w-3.5 h-3.5 text-accent shrink-0 mt-0.5" />
         <div>
-          <span className="font-bold text-accent">NOTICE:</span> Ethernet/IP framing and client IP/MAC addresses are mock-reconstructed client-side for compatibility. The nameserver IP is extracted dynamically from the trace.
+          <span className="font-bold text-accent">NOTICE:</span> Ethernet/IP/{resolvedOverTcp ? 'TCP' : 'UDP'} framing {resolvedOverTcp ? '(including SYN/ACK handshake) ' : ''}and client IP/MAC are simulated for PCAP compatibility as browsers lack raw socket access. The DNS payload and nameserver IP are real.
         </div>
       </div>
     </div>
@@ -577,11 +582,11 @@ function renderFrameNode(packet, timestamp, ip, port, tab) {
 }
 
 // Render Collapsible DNS Tree Node
-function renderDnsProtocolNode(packet, tab, openNodes, toggleNode, hoverBytes, isTimeout) {
+function renderDnsProtocolNode(packet, tab, openNodes, toggleNode, hoverBytes, isTimeout, resolvedOverTcp) {
   if (isTimeout && tab === 'RESPONSE') {
     return (
       <div className="text-red-500 text-[11px] font-bold uppercase p-4 border border-dashed border-red-500/20 bg-red-50/20 font-mono">
-        [-] Query Timed Out. No UDP response packet was received from the nameserver.
+        [-] Query Timed Out. No {resolvedOverTcp ? 'TCP' : 'UDP'} response packet was received from the nameserver.
       </div>
     );
   }

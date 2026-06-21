@@ -92,6 +92,59 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
         </div>
       )}
 
+      {/* Query Attempt History */}
+      {hop.attempts && hop.attempts.length > 0 && (
+        <div className="border border-ink/20 p-2.5 bg-base/30 flex flex-col gap-2 flex-none">
+          <div className="font-mono text-[8.5px] text-ink/45 uppercase tracking-wider font-bold select-none">
+            ;; Query Attempt History
+          </div>
+          <div className="flex flex-col gap-2">
+            {hop.attempts.map((att, idx) => (
+              <div key={idx} className="flex items-center justify-between text-[9px] font-mono leading-none border-b border-ink/5 pb-1.5 last:border-b-0 last:pb-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-ink/35 select-none font-bold">#{idx + 1}</span>
+                  <span className={`px-1 py-[0.5px] font-bold text-[8px] border leading-none ${
+                    att.protocol === 'TCP'
+                      ? 'border-dashed border-orange-500 text-orange-600 bg-orange-500/5'
+                      : 'border-ink/20 text-ink bg-ink/5'
+                  }`}>
+                    {att.protocol}
+                  </span>
+                  <span className={`font-bold ${att.success ? 'text-success' : 'text-error'}`}>
+                    {att.success ? 'SUCCESS' : 'FAILED'}
+                  </span>
+                  {att.isTruncated && (
+                    <span className="px-1 py-[0.5px] border border-red-500/20 text-red-600 bg-red-500/5 font-black text-[7px] leading-none animate-pulse">
+                      TRUNCATED
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-ink/60 text-[8.5px]">
+                  <span>{att.latencyMs}ms</span>
+                  {att.success ? (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span>{att.byteLength}B</span>
+                      <span className="opacity-40">|</span>
+                      <span className={att.rcode === 'NOERROR' ? 'text-success font-bold' : 'text-error font-bold'}>
+                        {att.rcode}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span className="text-error font-bold truncate max-w-[120px]" title={att.error}>
+                        {att.error}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Response Header Flags */}
       {hop.response?.flags && hop.response.flags.length > 0 && (
         <div className="flex flex-col gap-1 flex-none">

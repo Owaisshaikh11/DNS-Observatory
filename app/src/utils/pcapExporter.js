@@ -108,15 +108,21 @@ export function calculateIpChecksum(header) {
 }
 
 // Wraps DNS bytes in Ethernet + IP (v4/v6) + UDP layers, returns headers and packet data
+// Wraps DNS bytes in Ethernet + IP (v4/v6) + UDP/TCP layers, returns headers and packet data
 export function buildEthernetPacket({
-  dnsBytes,
+  dnsBytes = new Uint8Array(0),
   isRequest,
   serverIpStr,
   serverPort = 53,
   clientPort = 50000,
-  timestampMs
+  timestampMs,
+  transport = 'UDP',
+  tcpFlags = 0x18, // Default PSH-ACK for TCP data segments
+  tcpSeq = 0,
+  tcpAck = 0
 }) {
   const isIPv6 = serverIpStr.includes(':');
+  const isTcp = transport === 'TCP';
 
   // Client and Server IP buffers
   const clientIpBytes = isIPv6 
@@ -132,8 +138,8 @@ export function buildEthernetPacket({
   const dstPort = isRequest ? serverPort : clientPort;
 
   // Mock MAC addresses
-  const clientMac = new Uint8Array([2, 0, 0, 0, 0, 1]); // locally administered
-  const serverMac = new Uint8Array([2, 0, 0, 0, 0, 2]); // locally administered
+  const clientMac = new Uint8Array([2, 0, 0, 0, 0, 1]);
+  const serverMac = new Uint8Array([2, 0, 0, 0, 0, 2]);
   const srcMac = isRequest ? clientMac : serverMac;
   const dstMac = isRequest ? serverMac : clientMac;
 
@@ -149,19 +155,29 @@ export function buildEthernetPacket({
     ethHeader[13] = 0x00; // IPv4 EtherType
   }
 
-  // 2. IP Header
-  let ipHeader;
-  const udpLength = 8 + dnsBytes.length;
+  // 2. Prepare Transport Payload (prepending 2-byte length for TCP data)
+  let transportPayload = dnsBytes;
+  if (isTcp && dnsBytes.length > 0) {
+    transportPayload = new Uint8Array(2 + dnsBytes.length);
+    transportPayload[0] = (dnsBytes.length >> 8) & 0xff;
+    transportPayload[1] = dnsBytes.length & 0xff;
+    transportPayload.set(dnsBytes, 2);
+  }
 
+  const transportHeaderLen = isTcp ? 20 : 8;
+  const transportPayloadLen = transportHeaderLen + transportPayload.length;
+
+  // 3. IP Header
+  let ipHeader;
   if (isIPv6) {
     ipHeader = new Uint8Array(40);
     // Version (6), Traffic Class (0), Flow Label (0) -> 0x60000000
     ipHeader[0] = 0x60;
     // Payload length
-    ipHeader[4] = (udpLength >> 8) & 0xff;
-    ipHeader[5] = udpLength & 0xff;
-    // Next Header: UDP (17)
-    ipHeader[6] = 17;
+    ipHeader[4] = (transportPayloadLen >> 8) & 0xff;
+    ipHeader[5] = transportPayloadLen & 0xff;
+    // Next Header: TCP (6) or UDP (17)
+    ipHeader[6] = isTcp ? 6 : 17;
     // Hop Limit: 64
     ipHeader[7] = 64;
     // Source and Destination IP
@@ -173,15 +189,15 @@ export function buildEthernetPacket({
     ipHeader[0] = 0x45;
     // DSCP/ECN: 0
     ipHeader[1] = 0x00;
-    // Total length: IP header (20) + UDP header (8) + DNS length
-    const ipTotalLen = 20 + udpLength;
+    // Total length: IP header (20) + Transport Header + Transport Payload
+    const ipTotalLen = 20 + transportPayloadLen;
     ipHeader[2] = (ipTotalLen >> 8) & 0xff;
     ipHeader[3] = ipTotalLen & 0xff;
     // Identification, Flags, Fragment offset: 0
     // TTL: 64
     ipHeader[8] = 64;
-    // Protocol: UDP (17)
-    ipHeader[9] = 17;
+    // Protocol: TCP (6) or UDP (17)
+    ipHeader[9] = isTcp ? 6 : 17;
     // Source and Destination IP
     ipHeader.set(srcIp, 12);
     ipHeader.set(dstIp, 16);
@@ -192,28 +208,42 @@ export function buildEthernetPacket({
     ipHeader[11] = checksum & 0xff;
   }
 
-  // 3. UDP Header (8 bytes)
-  const udpHeader = new Uint8Array(8);
-  udpHeader[0] = (srcPort >> 8) & 0xff;
-  udpHeader[1] = srcPort & 0xff;
-  udpHeader[2] = (dstPort >> 8) & 0xff;
-  udpHeader[3] = dstPort & 0xff;
-  udpHeader[4] = (udpLength >> 8) & 0xff;
-  udpHeader[5] = udpLength & 0xff;
-  // Checksum: 0x0000 (disabled/ignored in UDP over IPv4)
-  udpHeader[6] = 0x00;
-  udpHeader[7] = 0x00;
+  // 4. Transport Header (UDP/TCP)
+  let transportHeader;
+  if (isTcp) {
+    // TCP Header (20 bytes)
+    transportHeader = new Uint8Array(20);
+    const view = new DataView(transportHeader.buffer);
+    view.setUint16(0, srcPort, false); // Big endian
+    view.setUint16(2, dstPort, false);
+    view.setUint32(4, tcpSeq, false);
+    view.setUint32(8, tcpAck, false);
+    transportHeader[12] = 0x50; // Data Offset (5) -> 20 bytes, reserved 0
+    transportHeader[13] = tcpFlags;
+    view.setUint16(14, 64240, false); // Window size (64240)
+    // Checksum and Urgent Pointer are 0
+  } else {
+    // UDP Header (8 bytes)
+    transportHeader = new Uint8Array(8);
+    transportHeader[0] = (srcPort >> 8) & 0xff;
+    transportHeader[1] = srcPort & 0xff;
+    transportHeader[2] = (dstPort >> 8) & 0xff;
+    transportHeader[3] = dstPort & 0xff;
+    transportHeader[4] = (transportPayloadLen >> 8) & 0xff;
+    transportHeader[5] = transportPayloadLen & 0xff;
+    // Checksum: 0x0000 (disabled/ignored in UDP over IPv4)
+  }
 
-  // Assemble full frame bytes
-  const packetSize = ethHeader.length + ipHeader.length + udpHeader.length + dnsBytes.length;
+  // 5. Assemble full frame bytes
+  const packetSize = ethHeader.length + ipHeader.length + transportHeader.length + transportPayload.length;
   const fullPacket = new Uint8Array(packetSize);
   let offset = 0;
   fullPacket.set(ethHeader, offset); offset += ethHeader.length;
   fullPacket.set(ipHeader, offset); offset += ipHeader.length;
-  fullPacket.set(udpHeader, offset); offset += udpHeader.length;
-  fullPacket.set(dnsBytes, offset);
+  fullPacket.set(transportHeader, offset); offset += transportHeader.length;
+  fullPacket.set(transportPayload, offset);
 
-  // 4. PCAP Packet Header (16 bytes)
+  // 6. PCAP Packet Header (16 bytes)
   const pcapPacketHeader = new Uint8Array(16);
   const sec = Math.floor(timestampMs / 1000);
   const usec = Math.floor((timestampMs % 1000) * 1000);
@@ -274,13 +304,252 @@ export function downloadBlob(bytes, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Generates standard TCP connection packets: SYN, SYN-ACK, ACK, Query, Response, FIN-ACK, ACK
+export function buildTcpFlowPackets({
+  queryBytes,
+  responseBytes,
+  serverIpStr,
+  serverPort = 53,
+  clientPort = 50000,
+  timestampMs,
+  success = true,
+  error = null
+}) {
+  const packets = [];
+  const baseTime = timestampMs;
+
+  let clientSeq = 1000;
+  let serverSeq = 2000;
+
+  // 1. SYN: Client -> Server
+  packets.push(buildEthernetPacket({
+    dnsBytes: new Uint8Array(0),
+    isRequest: true,
+    serverIpStr,
+    serverPort,
+    clientPort,
+    timestampMs: baseTime,
+    transport: 'TCP',
+    tcpFlags: 0x02, // SYN
+    tcpSeq: clientSeq,
+    tcpAck: 0
+  }));
+
+  // If connection refused
+  if (!success && (error?.includes('refused') || error?.includes('ECONNREFUSED'))) {
+    // 2. RST-ACK: Server -> Client
+    packets.push(buildEthernetPacket({
+      dnsBytes: new Uint8Array(0),
+      isRequest: false,
+      serverIpStr,
+      serverPort,
+      clientPort,
+      timestampMs: baseTime + 1,
+      transport: 'TCP',
+      tcpFlags: 0x14, // RST-ACK
+      tcpSeq: serverSeq,
+      tcpAck: clientSeq + 1
+    }));
+    return packets;
+  }
+
+  // If connection timed out (no response to SYN)
+  if (!success) {
+    return packets;
+  }
+
+  // 2. SYN-ACK: Server -> Client
+  packets.push(buildEthernetPacket({
+    dnsBytes: new Uint8Array(0),
+    isRequest: false,
+    serverIpStr,
+    serverPort,
+    clientPort,
+    timestampMs: baseTime + 1,
+    transport: 'TCP',
+    tcpFlags: 0x12, // SYN-ACK
+    tcpSeq: serverSeq,
+    tcpAck: clientSeq + 1
+  }));
+
+  clientSeq += 1;
+  serverSeq += 1;
+
+  // 3. ACK: Client -> Server
+  packets.push(buildEthernetPacket({
+    dnsBytes: new Uint8Array(0),
+    isRequest: true,
+    serverIpStr,
+    serverPort,
+    clientPort,
+    timestampMs: baseTime + 2,
+    transport: 'TCP',
+    tcpFlags: 0x10, // ACK
+    tcpSeq: clientSeq,
+    tcpAck: serverSeq
+  }));
+
+  // 4. TCP Query Data: Client -> Server
+  if (queryBytes && queryBytes.length > 0) {
+    packets.push(buildEthernetPacket({
+      dnsBytes: queryBytes,
+      isRequest: true,
+      serverIpStr,
+      serverPort,
+      clientPort,
+      timestampMs: baseTime + 5,
+      transport: 'TCP',
+      tcpFlags: 0x18, // PSH-ACK
+      tcpSeq: clientSeq,
+      tcpAck: serverSeq
+    }));
+    clientSeq += 2 + queryBytes.length; // Include 2-byte TCP message length prefix
+  }
+
+  // 5. TCP Response Data: Server -> Client
+  if (responseBytes && responseBytes.length > 0) {
+    packets.push(buildEthernetPacket({
+      dnsBytes: responseBytes,
+      isRequest: false,
+      serverIpStr,
+      serverPort,
+      clientPort,
+      timestampMs: baseTime + 15,
+      transport: 'TCP',
+      tcpFlags: 0x18, // PSH-ACK
+      tcpSeq: serverSeq,
+      tcpAck: clientSeq
+    }));
+    serverSeq += 2 + responseBytes.length; // Include 2-byte TCP message length prefix
+  }
+
+  // 6. FIN-ACK: Client -> Server
+  packets.push(buildEthernetPacket({
+    dnsBytes: new Uint8Array(0),
+    isRequest: true,
+    serverIpStr,
+    serverPort,
+    clientPort,
+    timestampMs: baseTime + 20,
+    transport: 'TCP',
+    tcpFlags: 0x11, // FIN-ACK
+    tcpSeq: clientSeq,
+    tcpAck: serverSeq
+  }));
+
+  clientSeq += 1;
+
+  // 7. FIN-ACK: Server -> Client
+  packets.push(buildEthernetPacket({
+    dnsBytes: new Uint8Array(0),
+    isRequest: false,
+    serverIpStr,
+    serverPort,
+    clientPort,
+    timestampMs: baseTime + 22,
+    transport: 'TCP',
+    tcpFlags: 0x11, // FIN-ACK
+    tcpSeq: serverSeq,
+    tcpAck: clientSeq
+  }));
+
+  serverSeq += 1;
+
+  // 8. ACK: Client -> Server
+  packets.push(buildEthernetPacket({
+    dnsBytes: new Uint8Array(0),
+    isRequest: true,
+    serverIpStr,
+    serverPort,
+    clientPort,
+    timestampMs: baseTime + 23,
+    transport: 'TCP',
+    tcpFlags: 0x10, // ACK
+    tcpSeq: clientSeq,
+    tcpAck: serverSeq
+  }));
+
+  return packets;
+}
+
+// Maps a single hop attempt object to PCAP packets (UDP or TCP)
+export function processAttempt({
+  attempt,
+  serverIpStr,
+  serverPort = 53,
+  clientPort = 50000,
+  timestampMs,
+  packets
+}) {
+  const isTcp = attempt.protocol === 'TCP';
+
+  if (isTcp) {
+    const queryBytes = attempt.queryPacket?.rawHex ? hexToBytes(attempt.queryPacket.rawHex) : new Uint8Array(0);
+    const responseBytes = attempt.responsePacket?.rawHex ? hexToBytes(attempt.responsePacket.rawHex) : new Uint8Array(0);
+    const tcpPackets = buildTcpFlowPackets({
+      queryBytes,
+      responseBytes,
+      serverIpStr,
+      serverPort,
+      clientPort,
+      timestampMs,
+      success: attempt.success,
+      error: attempt.error
+    });
+    packets.push(...tcpPackets);
+  } else {
+    // UDP Query
+    if (attempt.queryPacket?.rawHex) {
+      const queryBytes = hexToBytes(attempt.queryPacket.rawHex);
+      packets.push(buildEthernetPacket({
+        dnsBytes: queryBytes,
+        isRequest: true,
+        serverIpStr,
+        serverPort,
+        clientPort,
+        timestampMs: timestampMs - (attempt.latencyMs || 0),
+        transport: 'UDP'
+      }));
+    }
+
+    // UDP Response
+    if (attempt.success && attempt.responsePacket?.rawHex) {
+      const responseBytes = hexToBytes(attempt.responsePacket.rawHex);
+      packets.push(buildEthernetPacket({
+        dnsBytes: responseBytes,
+        isRequest: false,
+        serverIpStr,
+        serverPort,
+        clientPort,
+        timestampMs,
+        transport: 'UDP'
+      }));
+    }
+  }
+}
+
 // Main function to export a single hop query/response packets
 export function exportHopPcap(hop, traceTimestamp) {
   const baseMs = new Date(traceTimestamp || Date.now()).getTime();
   const packets = [];
   const clientPort = 50000 + (hop.step || 1);
 
-  if (hop.parallelQueries && hop.parallelQueries.length > 0) {
+  if (hop.attempts && hop.attempts.length > 0) {
+    let offsetMs = 0;
+    hop.attempts.forEach((att, attIdx) => {
+      const subClientPort = clientPort + attIdx * 10; // Avoid TCP port reuse warnings in Wireshark
+      const attemptTime = baseMs + (hop.cumulativeMs || 0) - (hop.latencyMs || 0) + offsetMs;
+      processAttempt({
+        attempt: att,
+        serverIpStr: hop.ip,
+        serverPort: hop.port || 53,
+        clientPort: subClientPort,
+        timestampMs: attemptTime,
+        packets
+      });
+      offsetMs += (att.latencyMs || 0) + 100; // Increment time sequentially
+    });
+  } else if (hop.parallelQueries && hop.parallelQueries.length > 0) {
     hop.parallelQueries.forEach((q, qIdx) => {
       const subClientPort = clientPort + qIdx;
       
@@ -313,7 +582,7 @@ export function exportHopPcap(hop, traceTimestamp) {
       }
     });
   } else {
-    // Single Query Hop
+    // Single Query Hop (legacy/fallback)
     // Request Packet
     if (hop.queryPacket?.rawHex) {
       const queryBytes = hexToBytes(hop.queryPacket.rawHex);
@@ -366,7 +635,23 @@ export function exportTracePcap(hops, traceTimestamp, domain = 'dns-trace') {
 
     const baseHopClientPort = 50000 + clientPortOffset;
 
-    if (hop.parallelQueries && hop.parallelQueries.length > 0) {
+    if (hop.attempts && hop.attempts.length > 0) {
+      let offsetMs = 0;
+      hop.attempts.forEach((att, attIdx) => {
+        const subClientPort = baseHopClientPort + attIdx * 10;
+        const attemptTime = baseMs + (hop.cumulativeMs || 0) - (hop.latencyMs || 0) + offsetMs;
+        processAttempt({
+          attempt: att,
+          serverIpStr: hop.ip,
+          serverPort: hop.port || 53,
+          clientPort: subClientPort,
+          timestampMs: attemptTime,
+          packets
+        });
+        offsetMs += (att.latencyMs || 0) + 100;
+      });
+      clientPortOffset += hop.attempts.length * 10;
+    } else if (hop.parallelQueries && hop.parallelQueries.length > 0) {
       hop.parallelQueries.forEach((q, qIdx) => {
         const subClientPort = baseHopClientPort + qIdx;
         
@@ -400,7 +685,7 @@ export function exportTracePcap(hops, traceTimestamp, domain = 'dns-trace') {
       });
       clientPortOffset += hop.parallelQueries.length;
     } else {
-      // Single Query Hop
+      // Single Query Hop (legacy/fallback)
       // Request Packet
       if (hop.queryPacket?.rawHex) {
         const queryBytes = hexToBytes(hop.queryPacket.rawHex);

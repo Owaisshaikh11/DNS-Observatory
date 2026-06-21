@@ -178,6 +178,7 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
     logger.error({ err }, `[Iterative] Failed to parse request query buffer: ${err.message}`);
   }
 
+  const attempts = [];
   const start = Date.now();
   let rawResponse = null;
   let latencyMs = 0;
@@ -185,11 +186,26 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
   let failureReason = null;
   let parsed = null;
 
+  const udpStart = Date.now();
   try {
     rawResponse = await sendUdpQuery(ip, port, query, opts.timeoutMs || 3000);
+    const udpLatency = Date.now() - udpStart;
     latencyMs = Date.now() - start;
     parsed = parseDnsResponse(rawResponse);
+    attempts.push({
+      protocol: 'UDP',
+      success: true,
+      latencyMs: udpLatency,
+      byteLength: rawResponse.length,
+      rcode: parsed.rcode,
+      isTruncated: parsed.isTruncated,
+      queryPacket,
+      responsePacket: {
+        rawHex: [...rawResponse].map(b => b.toString(16).padStart(2, '0')).join(' '),
+      },
+    });
   } catch (err) {
+    const udpLatency = Date.now() - udpStart;
     latencyMs = Date.now() - start;
     const expectedTxId = query.readUInt16BE(0);
     parsed = {
@@ -216,18 +232,41 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
       rawHex: '',
     };
     failureReason = `UDP Query Failed: ${err.message}. The nameserver did not respond or was unreachable over UDP port 53.`;
+    attempts.push({
+      protocol: 'UDP',
+      success: false,
+      latencyMs: udpLatency,
+      error: err.message,
+      rcode: 'SERVFAIL',
+      queryPacket,
+    });
   }
 
   // Fallback Trigger: Inspect parsed UDP response. If truncated, retry over TCP.
   if (!failureReason && parsed.isTruncated) {
     logger.info(`[Iterative] UDP response truncated for ${domain}, retrying query over TCP to ${ip}:${port}...`);
+    const tcpStart = Date.now();
     try {
       const tcpResponse = await sendTcpQuery(ip, port, query, opts.timeoutMs || 3000);
+      const tcpLatency = Date.now() - tcpStart;
       latencyMs = Date.now() - start; // recalculate overall latency
       rawResponse = tcpResponse;
       parsed = parseDnsResponse(rawResponse);
       resolvedOverTcp = true;
+      attempts.push({
+        protocol: 'TCP',
+        success: true,
+        latencyMs: tcpLatency,
+        byteLength: rawResponse.length,
+        rcode: parsed.rcode,
+        isTruncated: false,
+        queryPacket,
+        responsePacket: {
+          rawHex: [...rawResponse].map(b => b.toString(16).padStart(2, '0')).join(' '),
+        },
+      });
     } catch (err) {
+      const tcpLatency = Date.now() - tcpStart;
       logger.error(`[Iterative] TCP failover failed to ${ip}:${port} for ${domain}: ${err.message}`);
       // Graceful Failures: fail the hop gracefully by returning a mock SERVFAIL response
       latencyMs = Date.now() - start;
@@ -268,11 +307,19 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
       } else {
         failureReason = `TCP Failover Failed: ${err.message}. The TCP stream socket was reset or closed prematurely before the query complete.`;
       }
+      attempts.push({
+        protocol: 'TCP',
+        success: false,
+        latencyMs: tcpLatency,
+        error: err.message,
+        rcode: 'SERVFAIL',
+        queryPacket,
+      });
       resolvedOverTcp = false;
     }
   }
 
-  return { parsed, latencyMs, byteLength: rawResponse ? rawResponse.length : 0, queryHex, queryPacket, resolvedOverTcp, failureReason };
+  return { parsed, latencyMs, byteLength: rawResponse ? rawResponse.length : 0, queryHex, queryPacket, resolvedOverTcp, failureReason, attempts };
 }
 
 // ── Referral Extraction ────────────────────────────────────────────────────
@@ -334,7 +381,7 @@ async function resolveNsHostname(nsHostname) {
  * Builds a structured hop object from the result of a DNS query.
  * This is the shape that the frontend's HopCard component consumes.
  */
-function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain, queriedTypes, parallelQueries, queryPacket, resolvedOverTcp, failureReason }) {
+function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain, queriedTypes, parallelQueries, queryPacket, resolvedOverTcp, failureReason, attempts }) {
   return {
     id,
     step,
@@ -347,6 +394,7 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
     cumulativeMs,                        // total time elapsed up to and including this hop
     resolvedOverTcp: resolvedOverTcp || false,
     failureReason: failureReason || null,
+    attempts: attempts || null,
     description,                         // what happened here, in plain English
     geo,                                 // { flag, org, country, city, countryCode }
     queryDomain: queryDomain || null,
@@ -459,7 +507,7 @@ async function iterativeTrace(domain, recordType = 'A') {
     let localQueryPacket = null;
 
     try {
-      const { parsed, latencyMs, byteLength, queryPacket, resolvedOverTcp, failureReason } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
+      const { parsed, latencyMs, byteLength, queryPacket, resolvedOverTcp, failureReason, attempts } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
         recursionDesired: true,
         dnssecOk: false,
       });
@@ -481,6 +529,7 @@ async function iterativeTrace(domain, recordType = 'A') {
           responsePacket: parsed,
           resolvedOverTcp,
           failureReason,
+          attempts,
         });
 
         const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
@@ -503,6 +552,7 @@ async function iterativeTrace(domain, recordType = 'A') {
               responsePacket: val.parsed,
               resolvedOverTcp: val.resolvedOverTcp,
               failureReason: val.failureReason,
+              attempts: val.attempts,
             });
           } else {
             localParallelQueries.push({
@@ -515,6 +565,7 @@ async function iterativeTrace(domain, recordType = 'A') {
               responsePacket: null,
               resolvedOverTcp: false,
               failureReason: `Query timed out or failed: ${res.reason.message}`,
+              attempts: null,
             });
           }
         });
@@ -532,6 +583,7 @@ async function iterativeTrace(domain, recordType = 'A') {
           responsePacket: localParsed,
           resolvedOverTcp,
           failureReason,
+          attempts,
         }];
       }
 
@@ -559,6 +611,7 @@ async function iterativeTrace(domain, recordType = 'A') {
         queryPacket,
         resolvedOverTcp,
         failureReason,
+        attempts,
       }));
       edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
 
@@ -677,6 +730,7 @@ async function iterativeTrace(domain, recordType = 'A') {
       let queryPacket = null;
       let resolvedOverTcp = false;
       let failureReason = null;
+      let attempts = null;
 
       try {
         const hopResult = await performHop(
@@ -689,6 +743,7 @@ async function iterativeTrace(domain, recordType = 'A') {
         queryPacket = hopResult.queryPacket;
         resolvedOverTcp = hopResult.resolvedOverTcp;
         failureReason = hopResult.failureReason;
+        attempts = hopResult.attempts;
       } catch (err) {
         cumulative += 1000;
         const failedGeo = await lookupGeoIp(currentQueryServerIp);
@@ -749,6 +804,7 @@ async function iterativeTrace(domain, recordType = 'A') {
           responsePacket: parsed,
           resolvedOverTcp,
           failureReason,
+          attempts,
         }];
 
         if (recordType.toUpperCase() === 'ALL' && !isNXDomain) {
@@ -772,6 +828,7 @@ async function iterativeTrace(domain, recordType = 'A') {
                 responsePacket: val.parsed,
                 resolvedOverTcp: val.resolvedOverTcp,
                 failureReason: val.failureReason,
+                attempts: val.attempts,
               });
             } else {
               parallelQueries.push({
@@ -784,6 +841,7 @@ async function iterativeTrace(domain, recordType = 'A') {
                 responsePacket: null,
                 resolvedOverTcp: false,
                 failureReason: `Query timed out or failed: ${res.reason.message}`,
+                attempts: null,
               });
             }
           });
@@ -825,6 +883,7 @@ async function iterativeTrace(domain, recordType = 'A') {
           queryPacket,
           resolvedOverTcp,
           failureReason,
+          attempts,
         }));
         edges.push({ from: previousNodeId, to: currentNodeId, label: nextReferralLabel });
         finalParsed = parsed;
@@ -900,10 +959,12 @@ async function iterativeTrace(domain, recordType = 'A') {
             responsePacket: parsed,
             resolvedOverTcp,
             failureReason,
+            attempts,
           }],
           queryPacket,
           resolvedOverTcp,
           failureReason,
+          attempts,
         }));
         edges.push({ from: previousNodeId, to: currentNodeId, label: nextReferralLabel });
 
