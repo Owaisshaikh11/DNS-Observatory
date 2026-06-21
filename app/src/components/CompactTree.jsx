@@ -46,6 +46,21 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const paddingX = 30;
 
   // Dynamic layout calculations
+  const segments = [];
+  let currentSegment = [];
+  if (hops) {
+    for (const hop of hops) {
+      currentSegment.push(hop);
+      if (hop.type === 'CNAME_REDIRECT') {
+        segments.push(currentSegment);
+        currentSegment = [];
+      }
+    }
+    if (currentSegment.length > 0) {
+      segments.push(currentSegment);
+    }
+  }
+
   const nodes = hops?.map((hop, index) => {
     let treeX = paddingX;
     if (columns > 1) {
@@ -57,6 +72,18 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       treeY = 30;
     } else if (hop.type === 'TLD') {
       treeY = 206;
+    } else if (hop.type === 'AUTH') {
+      const segment = segments.find(seg => seg.some(h => h.id === hop.id)) || [];
+      const authHopsInSegment = segment.filter(h => h.type === 'AUTH');
+      const authIndex = authHopsInSegment.findIndex(h => h.id === hop.id);
+
+      if (authHopsInSegment.length === 1) {
+        treeY = 118;
+      } else if (authHopsInSegment.length > 1) {
+        const startY = 175;
+        const endY = 118;
+        treeY = startY + (authIndex * (endY - startY)) / (authHopsInSegment.length - 1);
+      }
     }
 
     return {
