@@ -766,10 +766,18 @@ export default function VisualizerPage() {
               </div>
               <span className="opacity-30">|</span>
               {/* Authoritative response AA legend */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1" title="Authoritative Answer: Response came directly from the zone's authoritative nameserver (not cached).">
                 <span className="opacity-50">Auth:</span>
-                <span className="text-[6px] font-mono font-bold px-0.5 bg-accent text-white border border-accent leading-none">
+                <span className="text-[6px] font-mono font-bold px-0.5 bg-accent text-white border border-accent leading-none cursor-help">
                   AA
+                </span>
+              </div>
+              <span className="opacity-30">|</span>
+              {/* TCP Failover legend */}
+              <div className="flex items-center gap-1" title="TCP Failover: Query resolved over a TCP connection because the primary UDP response was truncated (TC=1).">
+                <span className="opacity-50">Protocol:</span>
+                <span className="text-[6px] font-mono font-bold px-0.5 border border-dashed border-orange-500 text-orange-600 bg-orange-500/5 leading-none cursor-help">
+                  TCP
                 </span>
               </div>
             </div>
@@ -799,6 +807,10 @@ export default function VisualizerPage() {
                   <div>
                     <span className="font-bold text-ink uppercase block mb-0.5">3. Out-of-band Glue Fallback</span>
                     If a referred nameserver has no glue record, it is resolved out-of-band (via `1.1.1.1`) to obtain its IP and continue tracing seamlessly.
+                  </div>
+                  <div>
+                    <span className="font-bold text-ink uppercase block mb-0.5">4. TCP Failover Support</span>
+                    If a UDP query response is truncated (indicated by the `TC = 1` flag), the resolver automatically establishes a TCP connection on port 53 to fetch the complete response payload.
                   </div>
                 </div>
               </div>
@@ -981,7 +993,7 @@ export default function VisualizerPage() {
 
               {/* Waterfall Scale Grid labels */}
               <div className="px-4 bg-ink/[0.02] border-b border-ink/10 shrink-0">
-                <div className="grid grid-cols-[28px_1.2fr_1.6fr_48px_68px] gap-3 px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wider text-ink/60 select-none items-center font-bold border border-transparent">
+                <div className="grid grid-cols-[28px_1.2fr_1.5fr_64px_68px] gap-3 px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wider text-ink/60 select-none items-center font-bold border border-transparent">
                   <div>Hop</div>
                   <div>Node</div>
                   <div className="relative flex flex-col justify-end select-none pr-2 w-full h-7">

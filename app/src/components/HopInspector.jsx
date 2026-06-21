@@ -8,6 +8,7 @@ import { useTraceStore } from '../stores/useTraceStore';
 
 export default function HopInspector({ hop, secondsElapsed = 0 }) {
   const [showHex, setShowHex] = useState(false);
+  const [tcpTip, setTcpTip] = useState(false);
 
   // Placeholder screen if no hop is selected
   if (!hop) {
@@ -47,9 +48,30 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
             </span>
           )}
         </div>
-        <div className="font-mono text-[8px] opacity-45 mt-1 leading-normal select-text">
-          SERVER: {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · IP: {hop.type === 'CNAME_REDIRECT' ? 'None' : hop.ip} · RTT: {hop.latencyMs}ms <br />
-          LOCATION: {hop.type === 'CNAME_REDIRECT' ? 'CNAME Record Routing' : `${hop.geo?.city || 'Unknown'}, ${hop.geo?.country || 'Local'}`} · ISP: {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : (hop.geo?.org || 'Local Network')}
+        <div className="font-mono text-[8px] mt-1 leading-normal select-text text-ink/75">
+          <span className="opacity-50">SERVER:</span> {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · <span className="opacity-50">IP:</span> {hop.type === 'CNAME_REDIRECT' ? 'None' : hop.ip} · <span className="opacity-50">RTT:</span> {hop.latencyMs}ms
+          {hop.resolvedOverTcp && (
+            <span 
+              className="interactive relative inline-block ml-1.5 align-middle select-none"
+              onMouseEnter={() => setTcpTip(true)}
+              onMouseLeave={() => setTcpTip(false)}
+            >
+              <span className="px-1 py-[0.5px] border border-dashed border-orange-500 text-orange-600 font-black text-[7px] bg-orange-500/5 leading-none block cursor-help">
+                TCP
+              </span>
+              {tcpTip && (
+                <div 
+                  className="absolute top-[calc(100%+4px)] right-0 w-52 p-2.5 bg-[#F0EDE8] border border-[#0D0D0D] text-[10px] leading-tight font-sans whitespace-normal z-[100] text-ink"
+                  style={{ boxShadow: '3px 3px 0 0 var(--color-accent)' }}
+                >
+                  <strong className="font-mono text-[#FF4D00] block mb-1 text-[9px]">TCP Failover</strong>
+                  Resolved over TCP because the primary UDP response packet was truncated (TC = 1).
+                </div>
+              )}
+            </span>
+          )}
+          <br />
+          <span className="opacity-50">LOCATION:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Record Routing' : `${hop.geo?.city || 'Unknown'}, ${hop.geo?.country || 'Local'}`} · <span className="opacity-50">ISP:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : (hop.geo?.org || 'Local Network')}
         </div>
       </div>
 
@@ -57,6 +79,18 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       <div className="font-mono text-[9px] text-ink/75 leading-relaxed italic select-text border-l border-accent/40 pl-3">
         {hop.description}
       </div>
+
+      {/* Failure Reason Callout */}
+      {hop.failureReason && (
+        <div className="flex flex-col gap-1 border border-dashed border-red-500 bg-red-50 p-3 sharp-border select-text">
+          <div className="font-mono text-[9.5px] font-bold text-red-700 flex items-center gap-1.5 uppercase tracking-wider leading-none select-none">
+            ⚠️ Resolution Warning / Error
+          </div>
+          <div className="font-mono text-[8.5px] text-red-600 leading-relaxed mt-1 font-medium">
+            {hop.failureReason}
+          </div>
+        </div>
+      )}
 
       {/* Response Header Flags */}
       {hop.response?.flags && hop.response.flags.length > 0 && (

@@ -20,6 +20,7 @@
  */
 
 const dgram = require('dgram');
+const net = require('net');
 const logger = require('./logger');
 const { buildDnsQuery } = require('./dns-query-writer');
 const { parseDnsResponse } = require('./dns-response-parser');
@@ -85,15 +86,82 @@ function sendUdpQuery(ip, port, queryBuffer, timeoutMs = 3000) {
 }
 
 /**
+ * Sends a raw DNS query buffer over TCP to a target DNS server.
+ * Prefixes the query with its 2-byte Big-Endian length header and reads the response length.
+ * Cleanly destroys the socket under all conditions to prevent leaks.
+ *
+ * @param {string} ip          - Target DNS server IP
+ * @param {number} port        - Target port (usually 53)
+ * @param {Buffer} queryBuffer - Raw DNS query packet
+ * @param {number} timeoutMs   - Max wait time in milliseconds
+ * @returns {Promise<Buffer>}  - Raw DNS response packet (excluding length prefix)
+ */
+function sendTcpQuery(ip, port, queryBuffer, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const socket = new net.Socket();
+    let settled = false;
+    let receivedBuffer = Buffer.alloc(0);
+    let expectedLength = null;
+
+    const finish = (err, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket.destroy();
+      } catch {
+        /* already destroyed */
+      }
+      err ? reject(err) : resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      finish(new Error(`Timeout querying ${ip}:${port} over TCP after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    socket.connect(port, ip, () => {
+      // 2-Byte Length Rule: Prefix outgoing query buffers with their 2-byte Big-Endian length header
+      const lenBuffer = Buffer.alloc(2);
+      lenBuffer.writeUInt16BE(queryBuffer.length, 0);
+      const payload = Buffer.concat([lenBuffer, queryBuffer]);
+      socket.write(payload);
+    });
+
+    socket.on('data', (chunk) => {
+      // Concatenate incoming stream chunks
+      receivedBuffer = Buffer.concat([receivedBuffer, chunk]);
+
+      if (expectedLength === null && receivedBuffer.length >= 2) {
+        expectedLength = receivedBuffer.readUInt16BE(0);
+      }
+
+      // Only resolve when the received buffer size is >= 2 bytes + the expected packet length
+      if (expectedLength !== null && receivedBuffer.length >= 2 + expectedLength) {
+        const dnsPacket = receivedBuffer.slice(2, 2 + expectedLength);
+        finish(null, dnsPacket);
+      }
+    });
+
+    socket.on('error', (err) => finish(err));
+
+    socket.on('close', () => {
+      if (!settled) {
+        finish(new Error(`TCP socket closed before response was fully received`));
+      }
+    });
+  });
+}
+
+/**
  * Performs a single DNS hop: builds a query packet, sends it, parses the
- * response, and measures the round-trip time.
+ * response, and measures the round-trip time. Handles automatic TCP failover.
  *
  * @param {string} ip      - DNS server IP address to query
  * @param {number} port    - DNS server port (usually 53)
  * @param {string} domain  - Domain name to look up
  * @param {number} typeNum - Record type number
  * @param {object} opts    - { recursionDesired, dnssecOk, timeoutMs }
- * @returns {Promise<{parsed, latencyMs, byteLength, queryHex, queryPacket}>}
+ * @returns {Promise<{parsed, latencyMs, byteLength, queryHex, queryPacket, resolvedOverTcp}>}
  */
 async function performHop(ip, port, domain, typeNum, opts = {}) {
   const query = buildDnsQuery(domain, typeNum, {
@@ -111,11 +179,100 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
   }
 
   const start = Date.now();
-  const rawResponse = await sendUdpQuery(ip, port, query, opts.timeoutMs || 3000);
-  const latencyMs = Date.now() - start;
+  let rawResponse = null;
+  let latencyMs = 0;
+  let resolvedOverTcp = false;
+  let failureReason = null;
+  let parsed = null;
 
-  const parsed = parseDnsResponse(rawResponse);
-  return { parsed, latencyMs, byteLength: rawResponse.length, queryHex, queryPacket };
+  try {
+    rawResponse = await sendUdpQuery(ip, port, query, opts.timeoutMs || 3000);
+    latencyMs = Date.now() - start;
+    parsed = parseDnsResponse(rawResponse);
+  } catch (err) {
+    latencyMs = Date.now() - start;
+    const expectedTxId = query.readUInt16BE(0);
+    parsed = {
+      id: expectedTxId,
+      flags: ['QR'],
+      rawFlags: 0x8002, // SERVFAIL
+      opcode: 'QUERY',
+      opcodeNum: 0,
+      rcode: 'SERVFAIL',
+      rcodeNum: 2,
+      qdcount: 0,
+      ancount: 0,
+      nscount: 0,
+      arcount: 0,
+      isAuthoritative: false,
+      isTruncated: false,
+      isRecursionAvail: false,
+      questions: [],
+      answers: [],
+      authority: [],
+      additional: [],
+      dnssec: { rrsigPresent: false, dnskeyPresent: false, dsPresent: false },
+      dnssecPresent: false,
+      rawHex: '',
+    };
+    failureReason = `UDP Query Failed: ${err.message}. The nameserver did not respond or was unreachable over UDP port 53.`;
+  }
+
+  // Fallback Trigger: Inspect parsed UDP response. If truncated, retry over TCP.
+  if (!failureReason && parsed.isTruncated) {
+    logger.info(`[Iterative] UDP response truncated for ${domain}, retrying query over TCP to ${ip}:${port}...`);
+    try {
+      const tcpResponse = await sendTcpQuery(ip, port, query, opts.timeoutMs || 3000);
+      latencyMs = Date.now() - start; // recalculate overall latency
+      rawResponse = tcpResponse;
+      parsed = parseDnsResponse(rawResponse);
+      resolvedOverTcp = true;
+    } catch (err) {
+      logger.error(`[Iterative] TCP failover failed to ${ip}:${port} for ${domain}: ${err.message}`);
+      // Graceful Failures: fail the hop gracefully by returning a mock SERVFAIL response
+      latencyMs = Date.now() - start;
+      const expectedTxId = query.readUInt16BE(0);
+      parsed = {
+        id: expectedTxId,
+        flags: ['QR'],
+        rawFlags: 0x8002, // QR=1, RCODE=SERVFAIL
+        opcode: 'QUERY',
+        opcodeNum: 0,
+        rcode: 'SERVFAIL',
+        rcodeNum: 2,
+        qdcount: 0,
+        ancount: 0,
+        nscount: 0,
+        arcount: 0,
+        isAuthoritative: false,
+        isTruncated: false,
+        isRecursionAvail: false,
+        questions: [],
+        answers: [],
+        authority: [],
+        additional: [],
+        dnssec: { rrsigPresent: false, dnskeyPresent: false, dsPresent: false },
+        dnssecPresent: false,
+        rawHex: '',
+      };
+
+      // Formulate detailed, human-readable reasons for TCP failover failures
+      if (err.code === 'ECONNREFUSED' || err.message.includes('ECONNREFUSED')) {
+        if (ip === '127.0.0.1' && port === 5354) {
+          failureReason = `TCP Failover Failed: Connection refused to the local custom DNS server (127.0.0.1:5354). The custom DNS server only runs a UDP socket listener, and port 5354/TCP is closed/inactive.`;
+        } else {
+          failureReason = `TCP Failover Failed: Connection refused by nameserver ${ip}:${port} on TCP port 53. The target nameserver may not support TCP resolution, or port 53/TCP is closed.`;
+        }
+      } else if (err.message.includes('timeout') || err.message.includes('Timeout')) {
+        failureReason = `TCP Failover Failed: Connection timed out to nameserver ${ip}:${port} over TCP port 53. The server failed to respond within ${opts.timeoutMs || 3000}ms, possibly due to a firewall blocking TCP traffic.`;
+      } else {
+        failureReason = `TCP Failover Failed: ${err.message}. The TCP stream socket was reset or closed prematurely before the query complete.`;
+      }
+      resolvedOverTcp = false;
+    }
+  }
+
+  return { parsed, latencyMs, byteLength: rawResponse ? rawResponse.length : 0, queryHex, queryPacket, resolvedOverTcp, failureReason };
 }
 
 // ── Referral Extraction ────────────────────────────────────────────────────
@@ -177,7 +334,7 @@ async function resolveNsHostname(nsHostname) {
  * Builds a structured hop object from the result of a DNS query.
  * This is the shape that the frontend's HopCard component consumes.
  */
-function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain, queriedTypes, parallelQueries, queryPacket }) {
+function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulativeMs, parsed, geo, description, byteLength, queryDomain, queriedTypes, parallelQueries, queryPacket, resolvedOverTcp, failureReason }) {
   return {
     id,
     step,
@@ -188,6 +345,8 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
     port: port || 53,
     latencyMs,
     cumulativeMs,                        // total time elapsed up to and including this hop
+    resolvedOverTcp: resolvedOverTcp || false,
+    failureReason: failureReason || null,
     description,                         // what happened here, in plain English
     geo,                                 // { flag, org, country, city, countryCode }
     queryDomain: queryDomain || null,
@@ -300,7 +459,7 @@ async function iterativeTrace(domain, recordType = 'A') {
     let localQueryPacket = null;
 
     try {
-      const { parsed, latencyMs, byteLength, queryPacket } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
+      const { parsed, latencyMs, byteLength, queryPacket, resolvedOverTcp, failureReason } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
         recursionDesired: true,
         dnssecOk: false,
       });
@@ -320,6 +479,8 @@ async function iterativeTrace(domain, recordType = 'A') {
           rcode: parsed.rcode,
           queryPacket,
           responsePacket: parsed,
+          resolvedOverTcp,
+          failureReason,
         });
 
         const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
@@ -340,6 +501,8 @@ async function iterativeTrace(domain, recordType = 'A') {
               rcode: val.parsed.rcode,
               queryPacket: val.queryPacket,
               responsePacket: val.parsed,
+              resolvedOverTcp: val.resolvedOverTcp,
+              failureReason: val.failureReason,
             });
           } else {
             localParallelQueries.push({
@@ -350,6 +513,8 @@ async function iterativeTrace(domain, recordType = 'A') {
               error: res.reason.message,
               queryPacket: null,
               responsePacket: null,
+              resolvedOverTcp: false,
+              failureReason: `Query timed out or failed: ${res.reason.message}`,
             });
           }
         });
@@ -365,6 +530,8 @@ async function iterativeTrace(domain, recordType = 'A') {
           rcode: localParsed ? localParsed.rcode : 'UNKNOWN',
           queryPacket,
           responsePacket: localParsed,
+          resolvedOverTcp,
+          failureReason,
         }];
       }
 
@@ -390,6 +557,8 @@ async function iterativeTrace(domain, recordType = 'A') {
         queriedTypes: isLocalHit && recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
         parallelQueries: localParallelQueries,
         queryPacket,
+        resolvedOverTcp,
+        failureReason,
       }));
       edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
 
@@ -506,6 +675,8 @@ async function iterativeTrace(domain, recordType = 'A') {
       let byteLength = 0;
       let queryHex = '';
       let queryPacket = null;
+      let resolvedOverTcp = false;
+      let failureReason = null;
 
       try {
         const hopResult = await performHop(
@@ -516,6 +687,8 @@ async function iterativeTrace(domain, recordType = 'A') {
         byteLength = hopResult.byteLength;
         queryHex = hopResult.queryHex;
         queryPacket = hopResult.queryPacket;
+        resolvedOverTcp = hopResult.resolvedOverTcp;
+        failureReason = hopResult.failureReason;
       } catch (err) {
         cumulative += 1000;
         const failedGeo = await lookupGeoIp(currentQueryServerIp);
@@ -537,6 +710,8 @@ async function iterativeTrace(domain, recordType = 'A') {
           queriedTypes: [recordType.toUpperCase() === 'ALL' ? 'A' : recordType.toUpperCase()],
           parallelQueries: null,
           queryPacket: null,
+          resolvedOverTcp: false,
+          failureReason: `UDP Query Failed: ${err.message}. The nameserver was unreachable or did not respond.`,
         }));
         edges.push({ from: previousNodeId, to: currentNodeId, label: nextReferralLabel });
         throw new Error(`SERVFAIL: resolver query failed: ${err.message}`, { cause: err });
@@ -572,6 +747,8 @@ async function iterativeTrace(domain, recordType = 'A') {
           rcode: parsed.rcode,
           queryPacket,
           responsePacket: parsed,
+          resolvedOverTcp,
+          failureReason,
         }];
 
         if (recordType.toUpperCase() === 'ALL' && !isNXDomain) {
@@ -593,6 +770,8 @@ async function iterativeTrace(domain, recordType = 'A') {
                 rcode: val.parsed.rcode,
                 queryPacket: val.queryPacket,
                 responsePacket: val.parsed,
+                resolvedOverTcp: val.resolvedOverTcp,
+                failureReason: val.failureReason,
               });
             } else {
               parallelQueries.push({
@@ -603,6 +782,8 @@ async function iterativeTrace(domain, recordType = 'A') {
                 error: res.reason.message,
                 queryPacket: null,
                 responsePacket: null,
+                resolvedOverTcp: false,
+                failureReason: `Query timed out or failed: ${res.reason.message}`,
               });
             }
           });
@@ -642,6 +823,8 @@ async function iterativeTrace(domain, recordType = 'A') {
           queriedTypes: recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
           parallelQueries,
           queryPacket,
+          resolvedOverTcp,
+          failureReason,
         }));
         edges.push({ from: previousNodeId, to: currentNodeId, label: nextReferralLabel });
         finalParsed = parsed;
@@ -715,8 +898,12 @@ async function iterativeTrace(domain, recordType = 'A') {
             rcode: parsed.rcode,
             queryPacket,
             responsePacket: parsed,
+            resolvedOverTcp,
+            failureReason,
           }],
           queryPacket,
+          resolvedOverTcp,
+          failureReason,
         }));
         edges.push({ from: previousNodeId, to: currentNodeId, label: nextReferralLabel });
 

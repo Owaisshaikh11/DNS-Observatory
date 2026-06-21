@@ -591,17 +591,24 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                         <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
                           {node.label}
                         </span>
-                        {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? (
-                          <span className="ml-auto text-[6px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none shrink-0 select-none">
-                            {playbackState}
-                          </span>
-                        ) : (
-                          !isCname && isReached && node.response?.flags?.includes('AA') && (
-                            <span className={`ml-auto text-[6px] font-mono font-bold px-0.5 border leading-none shrink-0 select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
+                        {/* Badges container */}
+                        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) && (
+                            <span className="text-[6px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none select-none">
+                              {playbackState}
+                            </span>
+                          )}
+                          {!isCname && isReached && node.response?.flags?.includes('AA') && (
+                            <span className={`text-[6px] font-mono font-bold px-0.5 border leading-none select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
                               AA
                             </span>
-                          )
-                        )}
+                          )}
+                          {isReached && node.resolvedOverTcp && (
+                            <span className={`text-[6px] font-mono font-bold px-0.5 border border-dashed leading-none select-none ${isSel ? 'border-white/50 text-white' : 'border-orange-500 text-orange-600 bg-orange-500/5'}`}>
+                              TCP
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Middle line: IP / Latency or target CNAME */}
