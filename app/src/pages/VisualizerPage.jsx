@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Info } from 'lucide-react';
 import { useTraceStore } from '../stores/useTraceStore';
 import CompactTree from '../components/CompactTree';
 import HopCard from '../components/HopCard';
@@ -91,6 +92,7 @@ export default function VisualizerPage() {
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [showRawJson, setShowRawJson] = useState({});
+  const [showLabNotes, setShowLabNotes] = useState(false);
   const consoleEndRef = useRef(null);
 
   // Split resizer and panel collapse overrides state
@@ -736,9 +738,19 @@ export default function VisualizerPage() {
           {/* Structured Header Strip */}
           <div className="h-[40px] border-b border-ink flex items-center justify-between px-6 font-mono text-[9px] uppercase tracking-wider bg-base/90 backdrop-blur-md z-30 shrink-0 select-none">
             <div className="flex flex-col">
-              <span className="font-display font-black text-xs uppercase tracking-tight text-ink">
-                Spatial Resolution Path
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-display font-black text-xs uppercase tracking-tight text-ink">
+                  Spatial Resolution Path
+                </span>
+                <button
+                  onMouseEnter={() => setShowLabNotes(true)}
+                  onMouseLeave={() => setShowLabNotes(false)}
+                  className={`p-0.5 hover:text-accent cursor-pointer transition-colors ${showLabNotes ? 'text-accent' : 'text-ink/60'}`}
+                  title="Resolution Lab Info"
+                >
+                  <Info size={11} className="stroke-[2.5]" />
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center gap-4">
@@ -764,7 +776,34 @@ export default function VisualizerPage() {
           </div>
 
           {/* Main workspace containing centered canvas and HUD, aligned in width */}
-          <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center gap-4 justify-between">
+          <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center gap-4 justify-between relative">
+            {/* Floating Lab Notes Overlay */}
+            {showLabNotes && (
+              <div
+                onMouseEnter={() => setShowLabNotes(true)}
+                onMouseLeave={() => setShowLabNotes(false)}
+                className="absolute top-6 left-6 z-50 w-[300px] border border-ink bg-base p-4 shadow-[3px_3px_0_0_#0D0D0D] font-mono text-[9px] flex flex-col gap-3"
+              >
+                <div className="flex justify-between items-center border-b border-ink/20 pb-2">
+                  <span className="font-black text-accent uppercase tracking-wider">:: Resolution Lab Notes</span>
+                </div>
+                <div className="flex flex-col gap-2.5 leading-relaxed text-ink/80 select-text">
+                  <div>
+                    <span className="font-bold text-ink uppercase block mb-0.5">1. Cache Bypassed (Demo mode)</span>
+                    To visualize the complete trace, cache records are bypassed. Every lookup starts fresh from Root hints (`.`) down to the authoritative servers.
+                  </div>
+                  <div>
+                    <span className="font-bold text-ink uppercase block mb-0.5">2. Single-Path Traversal</span>
+                    Standard delegations return multiple redundant nameservers. The graph shows the active path queried rather than a branching tree of alternative servers.
+                  </div>
+                  <div>
+                    <span className="font-bold text-ink uppercase block mb-0.5">3. Out-of-band Glue Fallback</span>
+                    If a referred nameserver has no glue record, it is resolved out-of-band (via `1.1.1.1`) to obtain its IP and continue tracing seamlessly.
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* SVG Tree Graph */}
             <div className="w-full flex-1 flex items-center justify-center z-20">
               <CompactTree
