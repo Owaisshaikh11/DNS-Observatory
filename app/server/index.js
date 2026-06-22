@@ -71,7 +71,7 @@ async function start() {
    * Returns a TraceResult object (see dns-iterative.js for the full shape).
    */
   app.post('/api/dns/trace', async (req, res) => {
-    const { domain, type = 'A' } = req.body || {};
+    const { domain, type = 'A', resolver } = req.body || {};
 
     if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
       return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
@@ -89,10 +89,20 @@ async function start() {
       return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
     }
 
-    req.log.info({ domain: cleanDomain, recordType: cleanType }, `Initiating trace for ${cleanDomain} (${cleanType})`);
+    // Validate the resolver parameter
+    let cleanResolver = '1.1.1.1';
+    if (resolver && typeof resolver === 'string') {
+      const trimmed = resolver.trim();
+      const net = require('net');
+      if (net.isIP(trimmed)) {
+        cleanResolver = trimmed;
+      }
+    }
+
+    req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Initiating trace for ${cleanDomain} (${cleanType}) using resolver ${cleanResolver}`);
 
     try {
-      const trace = await iterativeTrace(cleanDomain, cleanType);
+      const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver);
       res.json(trace);
     } catch (err) {
       req.log.error({ err, domain: cleanDomain, recordType: cleanType }, `Error executing trace for ${cleanDomain}`);

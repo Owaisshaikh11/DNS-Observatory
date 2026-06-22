@@ -362,18 +362,27 @@ function extractReferral(parsed) {
  * resolve the NS hostname separately. We use Cloudflare (1.1.1.1) with RD=1
  * for this "cold" lookup — we're not tracing it, just getting an IP.
  */
-async function resolveNsHostname(nsHostname) {
+async function resolveNsHostname(nsHostname, resolverIp = '1.1.1.1') {
   const query = buildDnsQuery(nsHostname, TYPE_NUMBERS.A, {
     recursionDesired: true,
     dnssecOk: false,
   });
   try {
-    const raw = await sendUdpQuery('1.1.1.1', 53, query, 3000);
+    const raw = await sendUdpQuery(resolverIp, 53, query, 3000);
     const parsed = parseDnsResponse(raw);
     const aRecord = parsed.answers.find(r => r.typeName === 'A');
     return aRecord ? aRecord.value : null;
-  } catch {
-    return null;
+  } catch (err) {
+    logger.warn(`GeoIP/NS resolution failed querying custom resolver ${resolverIp}, falling back to 1.1.1.1. Error: ${err.message}`);
+    try {
+      const raw = await sendUdpQuery('1.1.1.1', 53, query, 3000);
+      const parsed = parseDnsResponse(raw);
+      const aRecord = parsed.answers.find(r => r.typeName === 'A');
+      return aRecord ? aRecord.value : null;
+    } catch (fallbackErr) {
+      logger.error(`Fallback query to 1.1.1.1 also failed: ${fallbackErr.message}`);
+      return null;
+    }
   }
 }
 
@@ -442,7 +451,7 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
  * @param {string} recordType - Record type string (e.g. "A", "MX", "ALL")
  * @returns {Promise<TraceResult>}
  */
-async function iterativeTrace(domain, recordType = 'A') {
+async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') {
   const hops = [];
   const edges = [];
   let cumulative = 0;
@@ -786,7 +795,7 @@ async function iterativeTrace(domain, recordType = 'A') {
         const nsRecord = parsed.authority.find(r => r.typeName === 'NS');
         if (nsRecord && nsRecord.value) {
           const nsName = String(nsRecord.value).replace(/\.$/, '');
-          const resolvedIp = await resolveNsHostname(nsName);
+          const resolvedIp = await resolveNsHostname(nsName, resolverIp);
           if (resolvedIp) {
             ref = { nsName, ip: resolvedIp, zone: nsRecord.name.replace(/\.$/, '') };
           }

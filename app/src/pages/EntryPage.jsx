@@ -65,11 +65,12 @@ export default function EntryPage() {
     setDomain,
     setRecordType,
     setIsBenchmarkMode,
+    resolver,
+    setResolver,
   } = useTraceStore();
 
   const [domainInput, setDomainInput] = useState('');
   const [selectedRecord, setSelectedRecord] = useState('ALL');
-  const [selectedResolver, setSelectedResolver] = useState('1.1.1.1 (Cloudflare)');
   const [isBenchmarkModeChecked, setIsBenchmarkModeChecked] = useState(false);
   const [inputError, setInputError] = useState(false);
   const [pasteError, setPasteError] = useState(null);
@@ -140,7 +141,7 @@ export default function EntryPage() {
       setRecordType(selectedRecord);
       setIsBenchmarkMode(isBenchmarkModeChecked);
       startTrace(cleanSubmitDomain, selectedRecord);
-      navigate(`/trace?q=${cleanSubmitDomain}&type=${selectedRecord}&benchmark=${isBenchmarkModeChecked}`);
+      navigate(`/trace?q=${cleanSubmitDomain}&type=${selectedRecord}&benchmark=${isBenchmarkModeChecked}&resolver=${encodeURIComponent(resolver)}`);
     } else {
       setInputError(true);
       setTimeout(() => setInputError(false), 400);
@@ -413,9 +414,9 @@ export default function EntryPage() {
                   />
                   <BrutalistSelect
                     label="Recursive Resolver"
-                    value={selectedResolver}
+                    value={resolver}
                     options={['1.1.1.1 (Cloudflare)', '8.8.8.8 (Google)', 'System Default']}
-                    onChange={setSelectedResolver}
+                    onChange={setResolver}
                     width="w-full md:w-[260px]"
                   />
                 </div>

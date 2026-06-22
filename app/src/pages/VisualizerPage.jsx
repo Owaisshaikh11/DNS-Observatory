@@ -71,6 +71,7 @@ export default function VisualizerPage() {
   const qParam = searchParams.get('q');
   const typeParam = searchParams.get('type') || 'ALL';
   const benchmarkParam = searchParams.get('benchmark') === 'true';
+  const resolverParam = searchParams.get('resolver') || '1.1.1.1 (Cloudflare)';
 
   const {
     domain,
@@ -87,6 +88,7 @@ export default function VisualizerPage() {
     benchmarkData,
     isBenchmarking,
     toggleSlowMo,
+    resolver,
   } = useTraceStore();
 
   const [secondsElapsed, setSecondsElapsed] = useState(0);
@@ -147,10 +149,11 @@ export default function VisualizerPage() {
         domain: qParam,
         recordType: typeParam,
         isBenchmarkMode: benchmarkParam,
+        resolver: resolverParam,
       });
       useTraceStore.getState().startTrace(qParam, typeParam);
     }
-  }, [qParam, typeParam, benchmarkParam, traceData, domain]);
+  }, [qParam, typeParam, benchmarkParam, resolverParam, traceData, domain]);
 
   const hops = traceData?.hops || [];
   const edges = traceData?.edges || [];
@@ -253,7 +256,7 @@ export default function VisualizerPage() {
     useTraceStore.setState({ recordType: type });
     useTraceStore.getState().startTrace(domain, type);
     setSecondsElapsed(0);
-    navigate(`/trace?q=${domain}&type=${type}&benchmark=${isBenchmarkMode}`);
+    navigate(`/trace?q=${domain}&type=${type}&benchmark=${isBenchmarkMode}&resolver=${encodeURIComponent(resolver)}`);
   };
 
   // Format record helper for Answer cards
