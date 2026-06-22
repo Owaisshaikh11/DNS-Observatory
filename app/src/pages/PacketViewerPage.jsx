@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTraceStore } from '../stores/useTraceStore';
 import { usePacketStore } from '../stores/usePacketStore';
 import { exportHopPcap, exportTracePcap } from '../utils/pcapExporter';
-import FlagBadge from '../components/FlagBadge';
 import InteractiveGrid from '../components/InteractiveGrid';
 import {
   Activity,
@@ -142,7 +141,6 @@ export default function PacketViewerPage() {
   // Resolve which request/response packet is active
   let activeQueryPacket = null;
   let activeResponsePacket = null;
-  let byteLength = 0;
   let isTimeout = false;
   let resolvedOverTcp = false;
 
@@ -153,13 +151,11 @@ export default function PacketViewerPage() {
         activeQueryPacket = sub.queryPacket;
         activeResponsePacket = sub.responsePacket;
         isTimeout = sub.rcode === 'TIMEOUT';
-        byteLength = sub.byteLength;
         resolvedOverTcp = sub.resolvedOverTcp || false;
       }
     } else {
       activeQueryPacket = currentHop.queryPacket;
       activeResponsePacket = currentHop.response;
-      byteLength = currentHop.byteLength || 0;
       resolvedOverTcp = currentHop.resolvedOverTcp || false;
     }
   }
@@ -909,10 +905,16 @@ function renderResourceRecordValue(ans) {
       <span>Name: {ans.name}</span>
       <span>Type: {ans.typeName} ({ans.typeNum})</span>
       <span>TTL: {ans.ttl}s</span>
-      {ans.typeNum === 1 || ans.typeNum === 28 || ans.typeNum === 5 || ans.typeNum === 2 ? (
+      {ans.typeNum === 1 || ans.typeNum === 28 || ans.typeNum === 5 || ans.typeNum === 2 || ans.typeNum === 12 ? (
         <span>Address/Target: {ans.value}</span>
       ) : ans.typeNum === 15 ? (
         <span>MX Preference: {ans.value.preference} | Mail server exchange: {ans.value.exchange}</span>
+      ) : ans.typeNum === 33 && typeof ans.value === 'object' ? ( // SRV
+        <div className="pl-2 border-l border-ink/10 flex flex-col gap-0.5">
+          <span>Priority: {ans.value.priority} | Weight: {ans.value.weight}</span>
+          <span>Port: {ans.value.port}</span>
+          <span>Target host: {ans.value.target}</span>
+        </div>
       ) : ans.typeNum === 6 ? (
         <div className="pl-2 border-l border-ink/10 flex flex-col gap-0.5">
           <span>Primary DNS nameserver: {ans.value.mname}</span>

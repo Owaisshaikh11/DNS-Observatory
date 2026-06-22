@@ -141,5 +141,70 @@ describe("DNS Writer & Parser", () => {
       expect(errResponse.readUInt16BE(4)).toBe(0); // QDCOUNT
       expect(errResponse.readUInt16BE(6)).toBe(0); // ANCOUNT
     });
+
+    test("should parse EDNS0 (OPT record) inside a query's additional section", () => {
+      const buffer = Buffer.alloc(100);
+      // Header: Transaction ID 0x9999, Flags 0x0100 (RD), QDCount = 1, ANCount = 0, NSCount = 0, ARCount = 1
+      buffer.writeUInt16BE(0x9999, 0);
+      buffer.writeUInt16BE(0x0100, 2);
+      buffer.writeUInt16BE(1, 4);
+      buffer.writeUInt16BE(0, 6);
+      buffer.writeUInt16BE(0, 8);
+      buffer.writeUInt16BE(1, 10);
+
+      // Question: "dns.test" -> [3] d n s [4] t e s t [0]
+      let offset = 12;
+      buffer.writeUInt8(3, offset++);
+      buffer.write("dns", offset);
+      offset += 3;
+      buffer.writeUInt8(4, offset++);
+      buffer.write("test", offset);
+      offset += 4;
+      buffer.writeUInt8(0, offset++);
+      buffer.writeUInt16BE(TYPE_A, offset);
+      offset += 2;
+      buffer.writeUInt16BE(CLASS_IN, offset);
+      offset += 2;
+
+      // Additional section: OPT record
+      buffer.writeUInt8(0, offset++); // Name: root (.)
+      buffer.writeUInt16BE(41, offset); // Type: OPT (41)
+      offset += 2;
+      buffer.writeUInt16BE(4096, offset); // Class: UDP payload size (4096)
+      offset += 2;
+      buffer.writeUInt32BE(0x00008000, offset); // TTL: Extended RCODE=0, Version=0, DO flag=1
+      offset += 4;
+      buffer.writeUInt16BE(0, offset); // RDLength: 0
+      offset += 2;
+
+      const query = parseQuery(buffer.slice(0, offset));
+      expect(query.edns.present).toBe(true);
+      expect(query.edns.udpPayloadSize).toBe(4096);
+      expect(query.edns.dnssecOk).toBe(true);
+    });
+
+    test("should append OPT record to the response additional section if EDNS0 was present", () => {
+      const mockQueryWithEdns = {
+        header: { id: 0x9999, flags: 0x0100, qdcount: 1 },
+        questions: [{ name: "my.domain", type: TYPE_A, class: CLASS_IN }],
+        edns: { present: true, udpPayloadSize: 4096, dnssecOk: true }
+      };
+
+      const response = createResponse(mockQueryWithEdns, []);
+
+      // ARCOUNT should be 1
+      expect(response.readUInt16BE(10)).toBe(1);
+
+      // Total length should include the header (12), question (15), and OPT record (11) = 38 bytes
+      expect(response.length).toBe(38);
+
+      // Verify OPT record fields
+      const optOffset = 38 - 11;
+      expect(response.readUInt8(optOffset)).toBe(0); // Name: root (.)
+      expect(response.readUInt16BE(optOffset + 1)).toBe(41); // Type: OPT
+      expect(response.readUInt16BE(optOffset + 3)).toBe(4096); // Class: Max payload size
+      expect(response.readUInt32BE(optOffset + 5)).toBe(0x00008000); // TTL: Extended RCODE + Version + DO
+      expect(response.readUInt16BE(optOffset + 9)).toBe(0); // RDLength: 0
+    });
   });
 });

@@ -79,11 +79,11 @@ async function start() {
 
     // Sanitise: lowercase, remove trailing dot, reject obviously bad input
     const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-    if (!/^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$/.test(cleanDomain)) {
+    if (!/^[a-z0-9_]([a-z0-9\-_.]*[a-z0-9_])?$/.test(cleanDomain)) {
       return res.status(400).json({ error: `"${domain}" is not a valid domain name` });
     }
 
-    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'ALL'];
+    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV', 'ALL'];
     const cleanType = String(type).toUpperCase().trim();
     if (!allowedTypes.includes(cleanType)) {
       return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
@@ -139,7 +139,7 @@ async function start() {
     }
 
     const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA'];
+    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV'];
     const cleanType = String(type).toUpperCase().trim();
     if (!allowedTypes.includes(cleanType)) {
       return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
@@ -147,7 +147,7 @@ async function start() {
 
     const { buildDnsQuery } = require('./dns-query-writer');
     const dgram = require('dgram');
-    const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, MX: 15, TXT: 16, AAAA: 28 };
+    const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, SRV: 33 };
     const typeNum = TYPE_NUMBERS[cleanType] || 1;
 
     try {

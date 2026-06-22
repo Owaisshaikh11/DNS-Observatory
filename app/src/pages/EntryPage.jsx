@@ -18,8 +18,8 @@ const getValidationErrors = (val) => {
     errors.push("Spaces are not allowed");
   }
 
-  if (!/^[a-z0-9\-.]*$/i.test(val)) {
-    errors.push("Only alphanumeric characters, '-' and '.' are allowed");
+  if (!/^[a-z0-9\-_.]*$/i.test(val)) {
+    errors.push("Only alphanumeric characters, '-', '_', and '.' are allowed");
   }
 
   const parts = val.split('.');
@@ -407,7 +407,7 @@ export default function EntryPage() {
                   <BrutalistSelect
                     label="Record Type"
                     value={selectedRecord}
-                    options={['ALL', 'A', 'AAAA', 'MX', 'TXT', 'CNAME']}
+                    options={['ALL', 'A', 'AAAA', 'MX', 'TXT', 'CNAME', 'PTR', 'SRV']}
                     onChange={setSelectedRecord}
                     width="w-full md:w-[220px]"
                   />

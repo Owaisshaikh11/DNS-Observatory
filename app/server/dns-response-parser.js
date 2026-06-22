@@ -26,9 +26,11 @@ const TYPE_A      = 1;
 const TYPE_NS     = 2;
 const TYPE_CNAME  = 5;
 const TYPE_SOA    = 6;
+const TYPE_PTR    = 12;
 const TYPE_MX     = 15;
 const TYPE_TXT    = 16;
 const TYPE_AAAA   = 28;
+const TYPE_SRV    = 33;
 const TYPE_OPT    = 41; // EDNS0 pseudo-record
 const TYPE_DS     = 43; // DNSSEC Delegation Signer
 const TYPE_RRSIG  = 46; // DNSSEC Signature
@@ -320,9 +322,10 @@ function parseRdata(buffer, offset, type, length) {
       return groups.join(':');
     }
 
-    // ── NS / CNAME: compressed domain name ─────────────────────────────────
+    // ── NS / CNAME / PTR: compressed domain name ───────────────────────────
     case TYPE_NS:
-    case TYPE_CNAME: {
+    case TYPE_CNAME:
+    case TYPE_PTR: {
       if (offset >= buffer.length) return '';
       const [name] = parseDomainName(buffer, offset);
       return name;
@@ -352,6 +355,16 @@ function parseRdata(buffer, offset, type, length) {
       const preference = buffer.readUInt16BE(offset);
       const [exchange] = parseDomainName(buffer, offset + 2);
       return { preference, exchange };
+    }
+
+    // ── SRV: priority, weight, port, target domain name ─────────────────────
+    case TYPE_SRV: {
+      if (length < 6 || offset + 6 > buffer.length) return null;
+      const priority = buffer.readUInt16BE(offset);
+      const weight = buffer.readUInt16BE(offset + 2);
+      const port = buffer.readUInt16BE(offset + 4);
+      const [target] = parseDomainName(buffer, offset + 6);
+      return { priority, weight, port, target };
     }
 
     // ── TXT: one or more length-prefixed character strings ──────────────────

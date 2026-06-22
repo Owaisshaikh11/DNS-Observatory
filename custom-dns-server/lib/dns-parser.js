@@ -68,7 +68,7 @@ function parseQuery(buffer) {
   const opcode = (rawFlags & 0x7800) >> 11;
 
   const TYPE_NAMES = {
-    1: 'A', 2: 'NS', 5: 'CNAME', 6: 'SOA', 15: 'MX', 16: 'TXT', 28: 'AAAA'
+    1: 'A', 2: 'NS', 5: 'CNAME', 6: 'SOA', 12: 'PTR', 15: 'MX', 16: 'TXT', 28: 'AAAA', 33: 'SRV', 41: 'OPT', 43: 'DS', 46: 'RRSIG', 48: 'DNSKEY'
   };
 
   const questions = [];
@@ -91,6 +91,60 @@ function parseQuery(buffer) {
       startOffset,
       endOffset: offset
     });
+  }
+
+  // Traverse answers, authorities, and additional records to find OPT record if present
+  // Skip ancount answers
+  for (let i = 0; i < ancount; i++) {
+    if (offset >= buffer.length) break;
+    const [_, next] = parseDomainName(buffer, offset);
+    offset = next;
+    if (offset + 10 > buffer.length) {
+      offset = buffer.length;
+      break;
+    }
+    const rdlength = buffer.readUInt16BE(offset + 8);
+    offset += 10 + rdlength;
+  }
+
+  // Skip nscount authority records
+  for (let i = 0; i < nscount; i++) {
+    if (offset >= buffer.length) break;
+    const [_, next] = parseDomainName(buffer, offset);
+    offset = next;
+    if (offset + 10 > buffer.length) {
+      offset = buffer.length;
+      break;
+    }
+    const rdlength = buffer.readUInt16BE(offset + 8);
+    offset += 10 + rdlength;
+  }
+
+  // Parse arcount additional records
+  let edns = { present: false };
+  for (let i = 0; i < arcount; i++) {
+    if (offset >= buffer.length) break;
+    const [_, next] = parseDomainName(buffer, offset);
+    offset = next;
+    if (offset + 10 > buffer.length) {
+      offset = buffer.length;
+      break;
+    }
+    const type = buffer.readUInt16BE(offset);
+    const cls = buffer.readUInt16BE(offset + 2); // udpPayloadSize for OPT
+    const ttl = buffer.readUInt32BE(offset + 4); // extended RCODE, version, and flags for OPT
+    const rdlength = buffer.readUInt16BE(offset + 8);
+    offset += 10;
+
+    if (type === 41) { // OPT
+      const dnssecOk = (ttl & 0x8000) !== 0;
+      edns = {
+        present: true,
+        udpPayloadSize: cls,
+        dnssecOk
+      };
+    }
+    offset += rdlength;
   }
 
   // Parse flags array
@@ -117,7 +171,8 @@ function parseQuery(buffer) {
     nscount,
     arcount,
     questions,
-    rawHex
+    rawHex,
+    edns
   };
 }
 
@@ -134,10 +189,11 @@ function createResponse(query, answers = [], rcode = 0) {
   buffer.writeUInt16BE(flags, 2);
 
   const qdCount = query.questions && query.questions.length > 0 ? 1 : 0;
+  const hasEdns = query.edns && query.edns.present;
   buffer.writeUInt16BE(qdCount, 4); // QDCount
   buffer.writeUInt16BE(answers.length, 6); // ANCount
   buffer.writeUInt16BE(0, 8); // NSCount
-  buffer.writeUInt16BE(0, 10); // ARCount
+  buffer.writeUInt16BE(hasEdns ? 1 : 0, 10); // ARCount
   offset = 12;
 
   let questionName = "";
@@ -153,6 +209,32 @@ function createResponse(query, answers = [], rcode = 0) {
 
   for (const answer of answers) {
     offset = writeAnswer(buffer, offset, questionName, answer);
+  }
+
+  if (hasEdns) {
+    // Write OPT record at the end of the response buffer
+    // Name: 0x00 (root, 1 byte)
+    buffer.writeUInt8(0, offset);
+    offset += 1;
+
+    // Type: 41 (OPT, 2 bytes)
+    buffer.writeUInt16BE(41, offset);
+    offset += 2;
+
+    // Max UDP Payload Size: Class field (2 bytes). Capped at 4096.
+    const requestedSize = query.edns.udpPayloadSize || 4096;
+    const responsePayloadSize = Math.min(requestedSize, 4096);
+    buffer.writeUInt16BE(responsePayloadSize, offset);
+    offset += 2;
+
+    // Extended RCODE & Version & Flags: TTL field (4 bytes)
+    const ttlVal = query.edns.dnssecOk ? 0x00008000 : 0x00000000;
+    buffer.writeUInt32BE(ttlVal, offset);
+    offset += 4;
+
+    // RDLENGTH: 0 (2 bytes)
+    buffer.writeUInt16BE(0, offset);
+    offset += 2;
   }
 
   return buffer.slice(0, offset);

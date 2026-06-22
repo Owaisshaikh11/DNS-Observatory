@@ -7,3 +7,5 @@ planning-docs/
 .env
 AGENTS.md
 skills-lock.json
+app/lint_output.json
+app/lint_output.txt

@@ -21,6 +21,10 @@ export default function RecordTable({ records, accent, secondsElapsed = 0 }) {
       return `MNAME: ${val.mname} | RNAME: ${val.rname} | S: ${val.serial} | RF: ${val.refresh} | RT: ${val.retry}`;
     }
 
+    if (type === 'SRV') {
+      return `Pri: ${val.priority} | Wgt: ${val.weight} | Port: ${val.port} | Tgt: ${val.target}`;
+    }
+
     if (type === 'DS') {
       return `Tag: ${val.keyTag} | Alg: ${val.algorithm} | Type: ${val.digestType} | Dig: ${val.digest.substring(0, 10)}...`;
     }
