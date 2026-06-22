@@ -541,7 +541,7 @@ export default function EntryPage() {
 
         </main>
         {/* The Sticky Footer Layer */}
-        <Footer ref={footerRef} scrollContainerRef={scrollContainerRef} />
+        <Footer ref={footerRef} scrollContainerRef={scrollContainerRef} scrollY={scrollY} />
       </div>
     </motion.div>
   );

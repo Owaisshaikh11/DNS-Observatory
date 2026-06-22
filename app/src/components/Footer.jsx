@@ -53,15 +53,34 @@ function AsciiFooterLogo({ isFast }) {
 // engine, and a scroll-to-top command button. Placed at the bottom of the
 // Entry page's scroll content for a natural scroll-into-view reveal.
 
-const Footer = forwardRef(function Footer({ scrollContainerRef }, ref) {
-  const { scrollYProgress } = useScroll({
-    container: scrollContainerRef,
-  });
+const Footer = forwardRef(function Footer({ scrollContainerRef, scrollY }, ref) {
+  let scrollProgress = 0;
+  if (scrollContainerRef?.current) {
+    const container = scrollContainerRef.current;
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    if (maxScroll > 0) {
+      scrollProgress = Math.min(1, Math.max(0, container.scrollTop / maxScroll));
+    }
+  }
 
   // Kinetic Typography: text slides up and letter-spacing snaps tight on reveal
-  const yTranslate = useTransform(scrollYProgress, [0.75, 1], [120, 0]);
-  const tracking = useTransform(scrollYProgress, [0.8, 1], ['0.1em', '-0.04em']);
-  const footerOpacity = useTransform(scrollYProgress, [0.7, 0.9], [0, 1]);
+  const opacityVal = scrollProgress <= 0.7
+    ? 0
+    : scrollProgress >= 0.9
+      ? 1
+      : (scrollProgress - 0.7) / 0.2;
+
+  const yVal = scrollProgress <= 0.75
+    ? 120
+    : scrollProgress >= 1.0
+      ? 0
+      : 120 - 120 * (scrollProgress - 0.75) / 0.25;
+
+  const trackingVal = scrollProgress <= 0.8
+    ? '0.1em'
+    : scrollProgress >= 1.0
+      ? '-0.04em'
+      : `${0.1 - 0.14 * (scrollProgress - 0.8) / 0.2}em`;
 
   // ASCII Velocity: track mouse movement speed over the footer
   const [isFast, setIsFast] = useState(false);
@@ -147,13 +166,17 @@ const Footer = forwardRef(function Footer({ scrollContainerRef }, ref) {
       <div className="w-full flex flex-col md:flex-row items-end justify-between px-6 md:px-12 pb-8 gap-8 relative">
 
         {/* Kinetic Typography driven by scroll position */}
-        <motion.div
-          style={{ y: yTranslate, letterSpacing: tracking, opacity: footerOpacity }}
+        <div
+          style={{
+            transform: `translateY(${yVal}px)`,
+            letterSpacing: trackingVal,
+            opacity: opacityVal,
+          }}
           className="font-display font-black uppercase leading-[0.8] w-full pointer-events-none z-10 flex flex-col"
         >
           <div className="text-[15vw] md:text-[12vw] -mb-3 md:-mb-5">DNS</div>
           <div className="text-[15vw] md:text-[12vw]">OBSERVATORY</div>
-        </motion.div>
+        </div>
 
         {/* Interactive ASCII Velocity Logo */}
         <div className="shrink-0 hidden md:flex flex-col items-end pb-3 z-20 relative">
