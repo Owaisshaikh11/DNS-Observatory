@@ -46,6 +46,21 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const paddingX = 30;
 
   // Dynamic layout calculations
+  const segments = [];
+  let currentSegment = [];
+  if (hops) {
+    for (const hop of hops) {
+      currentSegment.push(hop);
+      if (hop.type === 'CNAME_REDIRECT') {
+        segments.push(currentSegment);
+        currentSegment = [];
+      }
+    }
+    if (currentSegment.length > 0) {
+      segments.push(currentSegment);
+    }
+  }
+
   const nodes = hops?.map((hop, index) => {
     let treeX = paddingX;
     if (columns > 1) {
@@ -57,6 +72,18 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       treeY = 30;
     } else if (hop.type === 'TLD') {
       treeY = 206;
+    } else if (hop.type === 'AUTH') {
+      const segment = segments.find(seg => seg.some(h => h.id === hop.id)) || [];
+      const authHopsInSegment = segment.filter(h => h.type === 'AUTH');
+      const authIndex = authHopsInSegment.findIndex(h => h.id === hop.id);
+
+      if (authHopsInSegment.length === 1) {
+        treeY = 118;
+      } else if (authHopsInSegment.length > 1) {
+        const startY = 175;
+        const endY = 118;
+        treeY = startY + (authIndex * (endY - startY)) / (authHopsInSegment.length - 1);
+      }
     }
 
     return {
@@ -564,17 +591,24 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                         <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
                           {node.label}
                         </span>
-                        {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? (
-                          <span className="ml-auto text-[6px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none shrink-0 select-none">
-                            {playbackState}
-                          </span>
-                        ) : (
-                          !isCname && isReached && node.response?.flags?.includes('AA') && (
-                            <span className={`ml-auto text-[6px] font-mono font-bold px-0.5 border leading-none shrink-0 select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
+                        {/* Badges container */}
+                        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) && (
+                            <span className="text-[6px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none select-none">
+                              {playbackState}
+                            </span>
+                          )}
+                          {!isCname && isReached && node.response?.flags?.includes('AA') && (
+                            <span className={`text-[6px] font-mono font-bold px-0.5 border leading-none select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
                               AA
                             </span>
-                          )
-                        )}
+                          )}
+                          {isReached && node.resolvedOverTcp && (
+                            <span className={`text-[6px] font-mono font-bold px-0.5 border border-dashed leading-none select-none ${isSel ? 'border-white/50 text-white' : 'border-orange-500 text-orange-600 bg-orange-500/5'}`}>
+                              TCP
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Middle line: IP / Latency or target CNAME */}

@@ -117,6 +117,7 @@ function parseDnsResponse(buffer) {
     const startOffset = offset;
     const [name, next] = parseDomainName(buffer, offset);
     offset = next;
+    if (offset + 4 > buffer.length) break;
     const type = buffer.readUInt16BE(offset);
     const cls  = buffer.readUInt16BE(offset + 2);
     offset += 4;
@@ -194,6 +195,7 @@ function parseSection(buffer, offset, count) {
     const rdlength = buffer.readUInt16BE(offset + 8);
     offset += 10;
 
+    if (offset + rdlength > buffer.length) break; // defensive check for truncated rdata
     const rdataEnd = offset + rdlength;
     const typeName = TYPE_NAMES[typeNum] || `TYPE${typeNum}`;
 
@@ -300,16 +302,17 @@ function parseSection(buffer, offset, count) {
  * Returns a human-readable value (string or object).
  */
 function parseRdata(buffer, offset, type, length) {
+  if (offset + length > buffer.length) return `<truncated RDATA of type ${type}>`;
   switch (type) {
     // ── A: 4-byte IPv4 address ──────────────────────────────────────────────
     case TYPE_A: {
-      if (length !== 4) return `<invalid A length: ${length}>`;
+      if (length !== 4 || offset + 4 > buffer.length) return `<invalid A length: ${length}>`;
       return `${buffer[offset]}.${buffer[offset+1]}.${buffer[offset+2]}.${buffer[offset+3]}`;
     }
 
     // ── AAAA: 16-byte IPv6 address ──────────────────────────────────────────
     case TYPE_AAAA: {
-      if (length !== 16) return `<invalid AAAA length: ${length}>`;
+      if (length !== 16 || offset + 16 > buffer.length) return `<invalid AAAA length: ${length}>`;
       const groups = [];
       for (let i = 0; i < 8; i++) {
         groups.push(buffer.readUInt16BE(offset + i * 2).toString(16));
@@ -320,13 +323,16 @@ function parseRdata(buffer, offset, type, length) {
     // ── NS / CNAME: compressed domain name ─────────────────────────────────
     case TYPE_NS:
     case TYPE_CNAME: {
+      if (offset >= buffer.length) return '';
       const [name] = parseDomainName(buffer, offset);
       return name;
     }
 
     // ── SOA: two domain names + five 32-bit integers ────────────────────────
     case TYPE_SOA: {
+      if (offset >= buffer.length) return {};
       const [mname, afterMname] = parseDomainName(buffer, offset);
+      if (afterMname >= buffer.length) return { mname };
       const [rname, afterRname] = parseDomainName(buffer, afterMname);
       if (afterRname + 20 > buffer.length) return { mname, rname };
       return {
@@ -342,6 +348,7 @@ function parseRdata(buffer, offset, type, length) {
 
     // ── MX: 16-bit preference + compressed exchange name ────────────────────
     case TYPE_MX: {
+      if (length < 2 || offset + 2 > buffer.length) return null;
       const preference = buffer.readUInt16BE(offset);
       const [exchange] = parseDomainName(buffer, offset + 2);
       return { preference, exchange };
@@ -353,8 +360,9 @@ function parseRdata(buffer, offset, type, length) {
       let pos = offset;
       const end = offset + length;
       while (pos < end) {
+        if (pos + 1 > buffer.length) break;
         const len = buffer.readUInt8(pos++);
-        if (pos + len > buffer.length) break;
+        if (pos + len > buffer.length || pos + len > end) break;
         strings.push(buffer.slice(pos, pos + len).toString('utf8'));
         pos += len;
       }
@@ -363,24 +371,26 @@ function parseRdata(buffer, offset, type, length) {
 
     // ── DS: Delegation Signer (DNSSEC) ──────────────────────────────────────
     case TYPE_DS: {
-      if (length < 4) return null;
+      if (length < 4 || offset + 4 > buffer.length) return null;
       const keyTag = buffer.readUInt16BE(offset);
       const algorithm = buffer.readUInt8(offset + 2);
       const digestType = buffer.readUInt8(offset + 3);
       const digestTypeName = digestType === 1 ? 'SHA-1' : digestType === 2 ? 'SHA-256' : digestType === 4 ? 'SHA-384' : 'UNKNOWN';
+      const digestEnd = offset + length;
+      if (digestEnd > buffer.length) return null;
       return {
         keyTag,
         algorithm,
         algorithmName: DNSSEC_ALGS[algorithm] || 'UNKNOWN',
         digestType,
         digestTypeName,
-        digest: buffer.slice(offset + 4, offset + length).toString('hex'),
+        digest: buffer.slice(offset + 4, digestEnd).toString('hex'),
       };
     }
 
     // ── DNSKEY: DNSSEC public key ────────────────────────────────────────────
     case TYPE_DNSKEY: {
-      if (length < 4) return null;
+      if (length < 4 || offset + 4 > buffer.length) return null;
       const flags = buffer.readUInt16BE(offset);
       const protocol = buffer.readUInt8(offset + 2);
       const algorithm = buffer.readUInt8(offset + 3);
@@ -397,7 +407,7 @@ function parseRdata(buffer, offset, type, length) {
 
     // ── RRSIG: DNSSEC Signature ──────────────────────────────────────────────
     case TYPE_RRSIG: {
-      if (length < 18) return null;
+      if (length < 18 || offset + 18 > buffer.length) return null;
       const typeCovered = buffer.readUInt16BE(offset);
       const algorithm = buffer.readUInt8(offset + 2);
       const labels = buffer.readUInt8(offset + 3);
@@ -405,7 +415,9 @@ function parseRdata(buffer, offset, type, length) {
       const expiration = buffer.readUInt32BE(offset + 8);
       const inception = buffer.readUInt32BE(offset + 12);
       const keyTag = buffer.readUInt16BE(offset + 16);
-      const [signerName] = parseDomainName(buffer, offset + 18);
+      const signerNameOffset = offset + 18;
+      if (signerNameOffset >= buffer.length) return null;
+      const [signerName] = parseDomainName(buffer, signerNameOffset);
       
       const expirationDate = new Date(expiration * 1000).toISOString().split('T')[0];
       const inceptionDate = new Date(inception * 1000).toISOString().split('T')[0];

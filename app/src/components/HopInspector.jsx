@@ -8,6 +8,7 @@ import { useTraceStore } from '../stores/useTraceStore';
 
 export default function HopInspector({ hop, secondsElapsed = 0 }) {
   const [showHex, setShowHex] = useState(false);
+  const [tcpTip, setTcpTip] = useState(false);
 
   // Placeholder screen if no hop is selected
   if (!hop) {
@@ -47,9 +48,30 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
             </span>
           )}
         </div>
-        <div className="font-mono text-[8px] opacity-45 mt-1 leading-normal select-text">
-          SERVER: {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · IP: {hop.type === 'CNAME_REDIRECT' ? 'None' : hop.ip} · RTT: {hop.latencyMs}ms <br />
-          LOCATION: {hop.type === 'CNAME_REDIRECT' ? 'CNAME Record Routing' : `${hop.geo?.city || 'Unknown'}, ${hop.geo?.country || 'Local'}`} · ISP: {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : (hop.geo?.org || 'Local Network')}
+        <div className="font-mono text-[8px] mt-1 leading-normal select-text text-ink/75">
+          <span className="opacity-50">SERVER:</span> {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · <span className="opacity-50">IP:</span> {hop.type === 'CNAME_REDIRECT' ? 'None' : hop.ip} · <span className="opacity-50">RTT:</span> {hop.latencyMs}ms
+          {hop.resolvedOverTcp && (
+            <span 
+              className="interactive relative inline-block ml-1.5 align-middle select-none"
+              onMouseEnter={() => setTcpTip(true)}
+              onMouseLeave={() => setTcpTip(false)}
+            >
+              <span className="px-1 py-[0.5px] border border-dashed border-orange-500 text-orange-600 font-black text-[7px] bg-orange-500/5 leading-none block cursor-help">
+                TCP
+              </span>
+              {tcpTip && (
+                <div 
+                  className="absolute top-[calc(100%+4px)] right-0 w-52 p-2.5 bg-[#F0EDE8] border border-[#0D0D0D] text-[10px] leading-tight font-sans whitespace-normal z-[100] text-ink"
+                  style={{ boxShadow: '3px 3px 0 0 var(--color-accent)' }}
+                >
+                  <strong className="font-mono text-[#FF4D00] block mb-1 text-[9px]">TCP Failover</strong>
+                  Resolved over TCP because the primary UDP response packet was truncated (TC = 1).
+                </div>
+              )}
+            </span>
+          )}
+          <br />
+          <span className="opacity-50">LOCATION:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Record Routing' : `${hop.geo?.city || 'Unknown'}, ${hop.geo?.country || 'Local'}`} · <span className="opacity-50">ISP:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : (hop.geo?.org || 'Local Network')}
         </div>
       </div>
 
@@ -57,6 +79,71 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       <div className="font-mono text-[9px] text-ink/75 leading-relaxed italic select-text border-l border-accent/40 pl-3">
         {hop.description}
       </div>
+
+      {/* Failure Reason Callout */}
+      {hop.failureReason && (
+        <div className="flex flex-col gap-1 border border-dashed border-red-500 bg-red-50 p-3 sharp-border select-text">
+          <div className="font-mono text-[9.5px] font-bold text-red-700 flex items-center gap-1.5 uppercase tracking-wider leading-none select-none">
+            ⚠️ Resolution Warning / Error
+          </div>
+          <div className="font-mono text-[8.5px] text-red-600 leading-relaxed mt-1 font-medium">
+            {hop.failureReason}
+          </div>
+        </div>
+      )}
+
+      {/* Query Attempt History */}
+      {hop.attempts && hop.attempts.length > 0 && (
+        <div className="border border-ink/20 p-2.5 bg-base/30 flex flex-col gap-2 flex-none">
+          <div className="font-mono text-[8.5px] text-ink/45 uppercase tracking-wider font-bold select-none">
+            ;; Query Attempt History
+          </div>
+          <div className="flex flex-col gap-2">
+            {hop.attempts.map((att, idx) => (
+              <div key={idx} className="flex items-center justify-between text-[9px] font-mono leading-none border-b border-ink/5 pb-1.5 last:border-b-0 last:pb-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-ink/35 select-none font-bold">#{idx + 1}</span>
+                  <span className={`px-1 py-[0.5px] font-bold text-[8px] border leading-none ${
+                    att.protocol === 'TCP'
+                      ? 'border-dashed border-orange-500 text-orange-600 bg-orange-500/5'
+                      : 'border-ink/20 text-ink bg-ink/5'
+                  }`}>
+                    {att.protocol}
+                  </span>
+                  <span className={`font-bold ${att.success ? 'text-success' : 'text-error'}`}>
+                    {att.success ? 'SUCCESS' : 'FAILED'}
+                  </span>
+                  {att.isTruncated && (
+                    <span className="px-1 py-[0.5px] border border-red-500/20 text-red-600 bg-red-500/5 font-black text-[7px] leading-none animate-pulse">
+                      TRUNCATED
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-ink/60 text-[8.5px]">
+                  <span>{att.latencyMs}ms</span>
+                  {att.success ? (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span>{att.byteLength}B</span>
+                      <span className="opacity-40">|</span>
+                      <span className={att.rcode === 'NOERROR' ? 'text-success font-bold' : 'text-error font-bold'}>
+                        {att.rcode}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span className="text-error font-bold truncate max-w-[120px]" title={att.error}>
+                        {att.error}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Response Header Flags */}
       {hop.response?.flags && hop.response.flags.length > 0 && (

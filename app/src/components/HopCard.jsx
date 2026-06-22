@@ -72,7 +72,7 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
         {/* Main Row / Header: Redesigned into 5-column layout aligning with telemetry scale */}
         <div
           onClick={handleToggle}
-          className="interactive grid grid-cols-[28px_1.2fr_1.6fr_48px_68px] gap-3 p-2 items-center select-none cursor-pointer"
+          className="interactive grid grid-cols-[28px_1.2fr_1.5fr_64px_68px] gap-3 p-2 items-center select-none cursor-pointer"
         >
           {/* Step Badge */}
           <div
@@ -132,8 +132,15 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
           )}
 
           {/* RTT Display */}
-          <div className={`font-mono text-[10px] font-bold text-right select-text ${isSelected ? 'text-white' : 'text-accent'}`}>
-            {hop.latencyMs}ms
+          <div className="flex flex-col items-end gap-0.5 min-w-0">
+            <div className={`font-mono text-[10px] font-bold text-right select-text ${isSelected ? 'text-white' : 'text-accent'}`}>
+              {hop.latencyMs}ms
+            </div>
+            {hop.resolvedOverTcp && (
+              <span className={`font-mono text-[6.5px] px-1 py-px border border-dashed select-none font-bold leading-none ${isSelected ? 'border-white/50 bg-white/10 text-white' : 'border-orange-500 bg-orange-500/5 text-orange-600'}`}>
+                TCP
+              </span>
+            )}
           </div>
 
           {/* Status + Expand Arrow */}

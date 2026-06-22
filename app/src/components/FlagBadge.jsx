@@ -6,6 +6,8 @@ const FLAG_DESC = {
     'TC': 'Truncation — Response too large for UDP, was truncated.',
     'RD': 'Recursion Desired — Client asked server to resolve recursively.',
     'RA': 'Recursion Available — Server supports recursive resolution.',
+    'AD': 'Authentic Data — Resolver verified DNSSEC signatures for this response.',
+    'CD': 'Checking Disabled — DNSSEC checking was disabled by the client.',
 };
 
 export default function FlagBadge({ flag }) {
