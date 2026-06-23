@@ -67,6 +67,8 @@ export default function EntryPage() {
     setIsBenchmarkMode,
     resolver,
     setResolver,
+    recentQueries,
+    clearRecentQueries,
   } = useTraceStore();
 
   const [domainInput, setDomainInput] = useState('');
@@ -78,8 +80,43 @@ export default function EntryPage() {
   const cleanDomain = domainInput.trim().toLowerCase();
   const validationErrors = getValidationErrors(cleanDomain);
 
+  const handleRecentQueryClick = (q) => {
+    setDomainInput(q.domain);
+    setSelectedRecord(q.type);
+    setDomain(q.domain);
+    setRecordType(q.type);
+    startTrace(q.domain, q.type);
+    navigate(`/trace?q=${q.domain}&type=${q.type}&benchmark=${isBenchmarkModeChecked}&resolver=${encodeURIComponent(resolver)}`);
+  };
+
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef(null);
+  const blurTimeoutRef = useRef(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  const handleInputFocus = () => {
+    if (blurTimeoutRef.current) {
+      clearTimeout(blurTimeoutRef.current);
+    }
+    setIsFocused(true);
+  };
+
+  const handleInputBlur = () => {
+    blurTimeoutRef.current = setTimeout(() => {
+      setIsFocused(false);
+      setShowHistory(false);
+      setHighlightedIndex(-1);
+    }, 200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const [scrollY, setScrollY] = useState(0);
   const [footerHeight, setFooterHeight] = useState(0);
@@ -312,11 +349,42 @@ export default function EntryPage() {
                       autoFocus
                       type="text"
                       value={domainInput}
-                      onFocus={() => setIsFocused(true)}
-                      onBlur={() => setIsFocused(false)}
+                      onFocus={handleInputFocus}
+                      onBlur={handleInputBlur}
                       onChange={(e) => {
                         setDomainInput(e.target.value.toLowerCase());
                         if (pasteError) setPasteError(null);
+                        setHighlightedIndex(-1);
+                      }}
+                      onKeyDown={(e) => {
+                        if (!recentQueries || recentQueries.length === 0) return;
+
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          if (!showHistory) {
+                            setShowHistory(true);
+                            setHighlightedIndex(0);
+                            return;
+                          }
+                          setHighlightedIndex((prev) => (prev + 1) % recentQueries.length);
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          if (!showHistory) {
+                            setShowHistory(true);
+                            setHighlightedIndex(recentQueries.length - 1);
+                            return;
+                          }
+                          setHighlightedIndex((prev) => (prev - 1 + recentQueries.length) % recentQueries.length);
+                        } else if (e.key === 'Enter') {
+                          if (showHistory && highlightedIndex >= 0) {
+                            e.preventDefault();
+                            handleRecentQueryClick(recentQueries[highlightedIndex]);
+                          }
+                        } else if (e.key === 'Escape' || e.key === 'Esc') {
+                          e.preventDefault();
+                          setShowHistory(false);
+                          setHighlightedIndex(-1);
+                        }
                       }}
                       onPaste={handleNativePaste}
                       placeholder=""
@@ -327,9 +395,16 @@ export default function EntryPage() {
                     <motion.div
                       animate={inputError ? { x: [-12, 12, -10, 10, -5, 5, 0] } : {}}
                       transition={{ duration: 0.4 }}
-                      className={`w-full text-center font-mono font-bold tracking-tight select-none h-[1.2em] flex items-center justify-center ${getDynamicFontSize(domainInput.length)}`}
+                      className={`w-full text-center font-mono font-bold tracking-tight select-none h-[1.2em] flex items-center justify-center ${getDynamicFontSize(
+                        (highlightedIndex >= 0 && showHistory ? recentQueries[highlightedIndex].domain : domainInput).length
+                      )}`}
                     >
-                      {domainInput ? (
+                      {highlightedIndex >= 0 && showHistory ? (
+                        <span className="text-ink">
+                          {recentQueries[highlightedIndex].domain.toUpperCase()}
+                          {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
+                        </span>
+                      ) : domainInput ? (
                         <span className="text-ink">
                           {domainInput.toUpperCase()}
                           {isFocused && <span className="animate-blink text-accent ml-1">█</span>}
@@ -348,6 +423,63 @@ export default function EntryPage() {
                         ? 'bg-accent'
                         : 'bg-gradient-to-r from-transparent via-ink/30 group-hover:via-accent to-transparent')
                       }`}></div>
+
+                    {/* Clean Minimalist History Dropdown */}
+                    {showHistory && recentQueries && recentQueries.length > 0 && (
+                      <div className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 w-full max-w-md bg-white border border-ink/15 z-50 shadow-[0_8px_30px_rgba(13,13,13,0.08)] overflow-hidden flex flex-col select-none">
+                        {/* Header bar */}
+                        <div className="bg-ink/[0.02] border-b border-ink/5 text-ink/40 px-3.5 py-2 text-[8px] font-mono flex justify-between items-center select-none uppercase font-bold tracking-wider">
+                          <span>Recent Lookups</span>
+                          <span className="text-[7.5px] opacity-60">ESC TO CLOSE</span>
+                        </div>
+
+                        {/* List */}
+                        <div className="flex flex-col bg-white">
+                          {recentQueries.map((q, idx) => {
+                            const isHighlighted = idx === highlightedIndex;
+                            return (
+                              <div
+                                key={idx}
+                                onMouseDown={(e) => {
+                                  e.preventDefault(); // prevents blur
+                                  handleRecentQueryClick(q);
+                                }}
+                                onMouseEnter={() => setHighlightedIndex(idx)}
+                                className={`w-full flex items-center justify-between px-3.5 py-2 border-b last:border-b-0 border-ink/5 font-mono text-[9px] cursor-pointer transition-colors ${
+                                  isHighlighted
+                                    ? 'bg-ink/[0.03] text-ink font-semibold'
+                                    : 'text-ink/70 hover:bg-ink/[0.01]'
+                                }`}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className={`w-1 h-1 rounded-full transition-all duration-200 ${isHighlighted ? 'bg-accent scale-100' : 'bg-transparent scale-0'}`}></span>
+                                  <span>{q.domain}</span>
+                                  <span className="text-[8px] text-ink/30 font-normal">/ {q.type}</span>
+                                </span>
+                                <span className={`text-[7.5px] font-bold tracking-wider transition-colors ${isHighlighted ? 'text-accent' : 'text-ink/20'}`}>
+                                  {isHighlighted ? '← ENTER' : '[SELECT]'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Footer Clear utility */}
+                        <div className="border-t border-ink/5 bg-transparent px-3.5 py-1.5 flex justify-end">
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault(); // prevents blur
+                              clearRecentQueries();
+                              setShowHistory(false);
+                            }}
+                            className="text-ink/30 hover:text-error transition-colors font-mono text-[8px] font-bold uppercase tracking-wider hover:underline cursor-pointer select-none bg-transparent border-0"
+                          >
+                            [Clear History]
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -382,9 +514,15 @@ export default function EntryPage() {
                 ) : (
                   <div className="flex flex-col items-center select-none h-12">
                     {/* Desktop shortcut hint */}
-                    <div className="hidden md:block font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none opacity-30 mt-2">
-                      [ PRESS CTRL+V TO PASTE URL ]
-                    </div>
+                    {isFocused && recentQueries && recentQueries.length > 0 ? (
+                      <div className="hidden md:block font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none text-accent font-bold animate-pulse mt-2">
+                        [ PRESS ↑ / ↓ TO CYCLE RECENT HISTORY ]
+                      </div>
+                    ) : (
+                      <div className="hidden md:block font-mono text-[9px] uppercase tracking-[0.15em] text-center select-none opacity-30 mt-2">
+                        [ PRESS CTRL+V TO PASTE URL ]
+                      </div>
+                    )}
 
                     {/* Mobile responsive paste button */}
                     <div className="block md:hidden mt-1">

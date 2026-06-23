@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Info } from 'lucide-react';
@@ -7,6 +7,7 @@ import CompactTree from '../components/CompactTree';
 import HopCard from '../components/HopCard';
 import HopInspector from '../components/HopInspector';
 import InteractiveGrid from '../components/InteractiveGrid';
+import { formatRecordValue } from '../utils/dnsFormatter';
 
 const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
   const logLines = [];
@@ -89,6 +90,7 @@ export default function VisualizerPage() {
     isBenchmarking,
     toggleSlowMo,
     resolver,
+    cancelPendingRequests,
   } = useTraceStore();
 
   const [secondsElapsed, setSecondsElapsed] = useState(0);
@@ -192,7 +194,6 @@ export default function VisualizerPage() {
   // Real-time TTL Countdown timer (ticks up seconds elapsed since completion)
   useEffect(() => {
     if (playbackState !== 'COMPLETE') {
-      setSecondsElapsed(0);
       return;
     }
 
@@ -204,21 +205,26 @@ export default function VisualizerPage() {
   }, [playbackState]);
 
   // Handle Playback Actions
-  const handlePrev = () => {
+  const handlePrev = useCallback(() => {
     if (activeStep > 0) {
       useTraceStore.setState({ playbackState: 'PAUSED' });
       setActiveStep(activeStep - 1);
     }
-  };
+  }, [activeStep, setActiveStep]);
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (activeStep < hops.length - 1) {
       useTraceStore.setState({ playbackState: 'PAUSED' });
       setActiveStep(activeStep + 1);
     }
-  };
+  }, [activeStep, hops.length, setActiveStep]);
 
-  const togglePlayback = () => {
+  const handleReplay = useCallback(() => {
+    setSecondsElapsed(0);
+    replayTrace();
+  }, [replayTrace]);
+
+  const togglePlayback = useCallback(() => {
     if (playbackState === 'COMPLETE' || playbackState === 'NXDOMAIN') {
       handleReplay();
     } else {
@@ -226,29 +232,56 @@ export default function VisualizerPage() {
         playbackState: playbackState === 'PLAYING' ? 'PAUSED' : 'PLAYING',
       });
     }
-  };
+  }, [playbackState, handleReplay]);
 
-  const handleReplay = () => {
-    setSecondsElapsed(0);
-    replayTrace();
-  };
-
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
+    cancelPendingRequests();
     navigate('/');
-  };
+  }, [cancelPendingRequests, navigate]);
 
-  // ESC key handler to navigate back to home search page
+  // Unmount cleanup to cancel active requests
+  useEffect(() => {
+    return () => {
+      cancelPendingRequests();
+    };
+  }, [cancelPendingRequests]);
+
+  // Keyboard navigation & playback shortcuts (Esc, Space, Arrows, R/r keys)
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const activeEl = document.activeElement;
+      if (
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.isContentEditable)
+      ) {
+        return;
+      }
+
       if (e.key === 'Escape' || e.key === 'Esc' || e.keyCode === 27) {
         e.preventDefault();
         e.stopPropagation();
         handleReset();
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        togglePlayback();
+      } else if (e.key === 'ArrowRight') {
+        handleNext();
+      } else if (e.key === 'ArrowLeft') {
+        handlePrev();
+      } else if (key === 'r') {
+        handleReplay();
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleReset]);
+  }, [handleReset, togglePlayback, handleNext, handlePrev, handleReplay]);
 
 
   // Trigger alternate query type
@@ -259,31 +292,7 @@ export default function VisualizerPage() {
     navigate(`/trace?q=${domain}&type=${type}&benchmark=${isBenchmarkMode}&resolver=${encodeURIComponent(resolver)}`);
   };
 
-  // Format record helper for Answer cards
-  const formatRecordValue = (val, type) => {
-    if (typeof val !== 'object' || val === null) {
-      if (type === 'TXT') {
-        return `"${val}"`;
-      }
-      return String(val);
-    }
-    if (type === 'MX') {
-      return `${val.preference} ${val.exchange}`;
-    }
-    if (type === 'SOA') {
-      return `MNAME: ${val.mname} | RNAME: ${val.rname} | S: ${val.serial} | RF: ${val.refresh} | RT: ${val.retry}`;
-    }
-    if (type === 'DS') {
-      return `Tag: ${val.keyTag} | Alg: ${val.algorithm} | Type: ${val.digestType} | Dig: ${val.digest.substring(0, 10)}...`;
-    }
-    if (type === 'DNSKEY') {
-      return `Flags: ${val.flags} | Proto: ${val.protocol} | KeyLen: ${val.keyLength}B`;
-    }
-    if (type === 'RRSIG') {
-      return `Covers: ${val.typeCovered} | KeyTag: ${val.keyTag} | Signer: ${val.signerName}`;
-    }
-    return JSON.stringify(val);
-  };
+
 
   // No active trace session
   if (!qParam) {
@@ -828,6 +837,17 @@ export default function VisualizerPage() {
                 playbackState={playbackState}
                 recordType={recordType}
               />
+            </div>
+
+            {/* Keyboard Shortcuts Legend Bar */}
+            <div className="font-mono text-[8px] opacity-45 uppercase tracking-widest flex flex-wrap gap-x-4 gap-y-1 select-none z-30 mb-2 border border-dashed border-ink/20 px-3 py-1 bg-base/50">
+              <span>[SPACE] PLAY/PAUSE</span>
+              <span>·</span>
+              <span>[← / →] STEP</span>
+              <span>·</span>
+              <span>[R] REPLAY</span>
+              <span>·</span>
+              <span>[ESC] EXIT</span>
             </div>
 
             {/* Console Logger & Benchmark Unified HUD Panel */}

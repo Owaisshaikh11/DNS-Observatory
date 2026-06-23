@@ -10,6 +10,16 @@ const getResolverIp = (name) => {
   return match ? match[1] : '1.1.1.1';
 };
 
+let initialRecentQueries = [];
+try {
+  const stored = localStorage.getItem('dns_trace_history');
+  if (stored) {
+    initialRecentQueries = JSON.parse(stored);
+  }
+} catch (e) {
+  console.error("Failed to parse recent queries:", e);
+}
+
 export const useTraceStore = create((set, get) => ({
   domain: '',
   recordType: 'ALL',
@@ -23,6 +33,8 @@ export const useTraceStore = create((set, get) => ({
   realTtl: 0,
   selectedHop: null,
   resolver: '1.1.1.1 (Cloudflare)',
+  activeAbortController: null,
+  recentQueries: initialRecentQueries,
 
   setDomain: (domain) => set({ domain }),
   setRecordType: (recordType) => set({ recordType }),
@@ -31,7 +43,25 @@ export const useTraceStore = create((set, get) => ({
   setIsBenchmarking: (isBenchmarking) => set({ isBenchmarking }),
   setResolver: (resolver) => set({ resolver }),
 
+  cancelPendingRequests: () => {
+    const controller = get().activeAbortController;
+    if (controller) {
+      controller.abort();
+    }
+    set({ activeAbortController: null });
+  },
+
   startTrace: async (domain, type) => {
+    // Abort existing trace or benchmark requests if active
+    const existingController = get().activeAbortController;
+    if (existingController) {
+      existingController.abort();
+    }
+
+    const controller = new AbortController();
+    const signal = controller.signal;
+    set({ activeAbortController: controller });
+
     const isBenchmarkMode = get().isBenchmarkMode;
     const resolverName = get().resolver;
     const resolverIp = getResolverIp(resolverName);
@@ -51,6 +81,7 @@ export const useTraceStore = create((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain, type }),
+        signal,
       })
         .then(res => res.json())
         .then(data => {
@@ -58,6 +89,7 @@ export const useTraceStore = create((set, get) => ({
           return data;
         })
         .catch(error => {
+          if (error.name === 'AbortError') return null;
           console.error("Failed to run benchmark:", error);
           set({ isBenchmarking: false });
           return null;
@@ -69,6 +101,7 @@ export const useTraceStore = create((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain, type, resolver: resolverIp }),
+        signal,
       })
 
       const data = await response.json()
@@ -77,10 +110,24 @@ export const useTraceStore = create((set, get) => ({
         playbackState: 'PLAYING'
       })
 
+      // Update query history on success
+      const currentQueries = get().recentQueries || [];
+      const filtered = currentQueries.filter(
+        q => !(q.domain.toLowerCase() === domain.toLowerCase() && q.type === type)
+      );
+      const updated = [{ domain, type }, ...filtered].slice(0, 5);
+      set({ recentQueries: updated });
+      try {
+        localStorage.setItem('dns_trace_history', JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to save recent queries:", e);
+      }
+
       if (isBenchmarkMode) {
         await benchmarkPromise;
       }
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error("Failed to start trace:", error)
       set({ playbackState: 'IDLE', isBenchmarking: false })
     }
@@ -90,4 +137,12 @@ export const useTraceStore = create((set, get) => ({
   setSelectedHop: (hopId) => set({ selectedHop: hopId }),
   toggleSlowMo: () => set((state) => ({ isSlowMo: !state.isSlowMo })),
   replayTrace: () => set({ activeStep: 0, playbackState: 'PLAYING', selectedHop: null }),
+  clearRecentQueries: () => {
+    set({ recentQueries: [] });
+    try {
+      localStorage.removeItem('dns_trace_history');
+    } catch (e) {
+      console.error("Failed to clear recent queries:", e);
+    }
+  },
 }))

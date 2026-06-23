@@ -5,6 +5,7 @@ import HexViewer from './HexViewer';
 import { Download } from 'lucide-react';
 import { exportHopPcap } from '../utils/pcapExporter';
 import { useTraceStore } from '../stores/useTraceStore';
+import CopyButton from './CopyButton';
 
 export default function HopInspector({ hop, secondsElapsed = 0 }) {
   const [showHex, setShowHex] = useState(false);
@@ -49,7 +50,12 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
           )}
         </div>
         <div className="font-mono text-[8px] mt-1 leading-normal select-text text-ink/75">
-          <span className="opacity-50">SERVER:</span> {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · <span className="opacity-50">IP:</span> {hop.type === 'CNAME_REDIRECT' ? 'None' : hop.ip} · <span className="opacity-50">RTT:</span> {hop.latencyMs}ms
+          <span className="opacity-50">SERVER:</span> {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · <span className="opacity-50">IP:</span> {hop.type === 'CNAME_REDIRECT' ? 'None' : (
+            <span className="inline-flex items-center group">
+              <span>{hop.ip}</span>
+              <CopyButton text={hop.ip} />
+            </span>
+          )} · <span className="opacity-50">RTT:</span> {hop.latencyMs}ms
           {hop.resolvedOverTcp && (
             <span 
               className="interactive relative inline-block ml-1.5 align-middle select-none"

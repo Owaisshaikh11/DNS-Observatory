@@ -1,3 +1,6 @@
+import { formatRecordValue } from '../utils/dnsFormatter';
+import CopyButton from './CopyButton';
+
 export default function RecordTable({ records, accent, secondsElapsed = 0 }) {
   if (!records || records.length === 0) {
     return (
@@ -7,49 +10,17 @@ export default function RecordTable({ records, accent, secondsElapsed = 0 }) {
     );
   }
 
-  // Format complex records (e.g. SOA, MX, DNSSEC records) into clean monospaced strings
-  const formatRecordValue = (val, type) => {
-    if (typeof val !== 'object' || val === null) {
-      return String(val);
-    }
-
-    if (type === 'MX') {
-      return `${val.preference} ${val.exchange}`;
-    }
-
-    if (type === 'SOA') {
-      return `MNAME: ${val.mname} | RNAME: ${val.rname} | S: ${val.serial} | RF: ${val.refresh} | RT: ${val.retry}`;
-    }
-
-    if (type === 'SRV') {
-      return `Pri: ${val.priority} | Wgt: ${val.weight} | Port: ${val.port} | Tgt: ${val.target}`;
-    }
-
-    if (type === 'DS') {
-      return `Tag: ${val.keyTag} | Alg: ${val.algorithm} | Type: ${val.digestType} | Dig: ${val.digest.substring(0, 10)}...`;
-    }
-
-    if (type === 'DNSKEY') {
-      return `Flags: ${val.flags} | Proto: ${val.protocol} | KeyLen: ${val.keyLength}B`;
-    }
-
-    if (type === 'RRSIG') {
-      return `Covers: ${val.typeCovered} | KeyTag: ${val.keyTag} | Signer: ${val.signerName}`;
-    }
-
-    return JSON.stringify(val);
-  };
-
   return (
     <div className="flex flex-col gap-0 border border-ink/10 bg-base/5 p-1.5 sharp-border max-w-full overflow-x-hidden select-text">
       {records.map((rec, i) => {
         const currentTtl = Math.max(0, rec.ttl - secondsElapsed);
         const isExpired = currentTtl === 0;
+        const formattedVal = formatRecordValue(rec.value, rec.typeName || rec.type);
 
         return (
           <div
             key={i}
-            className={`relative grid grid-cols-[1fr_36px_56px_1.2fr] gap-2 px-1.5 py-0.5 border-b border-ink/5 last:border-b-0 items-center font-mono text-[9px] transition-all duration-300 packet-field ${isExpired ? 'opacity-35 select-none' : ''
+            className={`relative grid grid-cols-[1fr_36px_56px_1.2fr] gap-2 px-1.5 py-0.5 border-b border-ink/5 last:border-b-0 items-center font-mono text-[9px] transition-all duration-300 packet-field group ${isExpired ? 'opacity-35 select-none' : ''
               }`}
           >
             {/* Name */}
@@ -70,8 +41,11 @@ export default function RecordTable({ records, accent, secondsElapsed = 0 }) {
             </span>
 
             {/* Value */}
-            <span className="truncate font-medium text-ink break-all" title={formatRecordValue(rec.value, rec.typeName || rec.type)}>
-              {formatRecordValue(rec.value, rec.typeName || rec.type)}
+            <span className="flex items-center justify-between min-w-0 font-medium text-ink">
+              <span className="truncate break-all" title={formattedVal}>
+                {formattedVal}
+              </span>
+              {!isExpired && <CopyButton text={formattedVal} />}
             </span>
 
             {/* Expired overlay indicator */}
