@@ -14,11 +14,34 @@ function startDnsUdpServer(port = 53) {
   const dnsEvents = new EventEmitter();
   server.dnsEvents = dnsEvents;
 
+  let bound = false;
   server.on("error", (err) => {
     logger.error({ err }, `DNS server socket error: ${err.message}`);
+    if (err.code === 'EADDRINUSE' && !bound) {
+      logger.warn(`DNS Port ${port} is in use. Falling back to an ephemeral UDP port.`);
+      server.bind(0);
+    }
+  });
+
+  server.on("listening", () => {
+    bound = true;
+    const address = server.address();
+    logger.info(`DNS server running on port ${address.port}`);
   });
 
   server.on("message", async (msg, rinfo) => {
+    // DNS Reflection Protection: drop response packets (QR = 1) immediately to prevent amplification vectors
+    if (msg.length >= 4) {
+      const flags = msg.readUInt16BE(2);
+      if ((flags & 0x8000) !== 0) {
+        logger.warn(
+          { remote: `${rinfo.address}:${rinfo.port}` },
+          `Dropped DNS response packet (QR = 1) received on listening port from ${rinfo.address}:${rinfo.port}`
+        );
+        return;
+      }
+    }
+
     const startTime = Date.now();
     let query;
 
@@ -105,7 +128,7 @@ function startDnsUdpServer(port = 53) {
     }
   });
 
-  server.bind(port, () => logger.info(`DNS server running on port ${port}`));
+  server.bind(port);
   return server;
 }
 

@@ -3,7 +3,7 @@
  *
  * Single Node.js process that runs:
  *   1. The custom DNS UDP server on port 5354
- *   2. The Express + Socket.io API server on port 4000
+ *   2. The Express  API server on port 4000
  *
  * Running both in the same process lets the telemetry bridge subscribe
  * directly to the DNS server's EventEmitter and stream events to the
@@ -258,9 +258,21 @@ async function start() {
   }
 
   // ── Start listening ────────────────────────────────────────────────────────
-  httpServer.listen(API_PORT, () => {
-    logger.info(`Visualizer backend running at http://localhost:${API_PORT}`);
+  httpServer.listen(API_PORT);
+
+  httpServer.on('listening', () => {
+    const boundPort = httpServer.address().port;
+    logger.info(`Visualizer backend running at http://localhost:${boundPort}`);
     logger.info(`Custom DNS server running on UDP port ${DNS_PORT}`);
+  });
+
+  httpServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.warn(`API Port ${API_PORT} in use, falling back to a random port.`);
+      httpServer.listen(0);
+    } else {
+      logger.error({ err }, 'HTTP server error');
+    }
   });
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────

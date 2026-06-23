@@ -7,6 +7,27 @@ import { exportHopPcap } from '../utils/pcapExporter';
 import { useTraceStore } from '../stores/useTraceStore';
 import CopyButton from './CopyButton';
 
+const renderIsp = (org) => {
+  if (!org || org === 'Local Network') return 'Local Network';
+  
+  // Extract ASxxxxx prefix
+  const match = org.match(/^(AS\d+)\s+(.+)$/);
+  if (match) {
+    const [_, asn, name] = match;
+    return (
+      <span className="inline-flex items-center gap-1.5 align-middle select-all">
+        <span className="px-1 py-[0.5px] border border-ink/20 text-ink/60 bg-ink/5 font-mono text-[7px] leading-none uppercase font-bold">
+          {asn}
+        </span>
+        <span className="truncate max-w-[200px]" title={name}>
+          {name}
+        </span>
+      </span>
+    );
+  }
+  return org;
+};
+
 export default function HopInspector({ hop, secondsElapsed = 0 }) {
   const [showHex, setShowHex] = useState(false);
   const [tcpTip, setTcpTip] = useState(false);
@@ -77,7 +98,11 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
             </span>
           )}
           <br />
-          <span className="opacity-50">LOCATION:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Record Routing' : `${hop.geo?.city || 'Unknown'}, ${hop.geo?.country || 'Local'}`} · <span className="opacity-50">ISP:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : (hop.geo?.org || 'Local Network')}
+          <span className="opacity-50">LOCATION:</span> {hop.type === 'CNAME_REDIRECT' 
+            ? 'CNAME Record Routing' 
+            : (hop.geo?.city && hop.geo.city !== 'Unknown' 
+                ? `${hop.geo.city}, ${hop.geo.country || 'Local'}` 
+                : (hop.geo?.country || 'Local'))} · <span className="opacity-50">ISP:</span> {hop.type === 'CNAME_REDIRECT' ? 'CNAME Alias Mapping' : renderIsp(hop.geo?.org)}
         </div>
       </div>
 

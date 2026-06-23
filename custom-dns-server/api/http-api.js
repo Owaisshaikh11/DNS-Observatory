@@ -92,9 +92,23 @@ function startHttpApi(port) {
     }
   });
 
-  return app.listen(port, () => {
-    logger.info(`HTTP API server running on port ${port}`);
+  const server = app.listen(port);
+
+  server.on('listening', () => {
+    const boundPort = server.address().port;
+    logger.info(`HTTP API server running on port ${boundPort}`);
   });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.warn(`HTTP API port ${port} is in use. Falling back to an ephemeral port.`);
+      server.listen(0);
+    } else {
+      logger.error({ err }, 'HTTP API server error');
+    }
+  });
+
+  return server;
 }
 
 module.exports = { startHttpApi };

@@ -8,6 +8,14 @@ const getCenter = (node) => ({
   y: node.treeY + NH / 2,
 });
 
+const cleanOrg = (org) => {
+  if (!org) return '';
+  return org
+    .replace(/^AS\d+\s+/g, '')
+    .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
+    .trim();
+};
+
 const simplifyLabel = (label) => {
   if (!label) return '';
   if (label.startsWith('Query ')) {
@@ -629,7 +637,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                           : isCname
                           ? (isReached ? `Alias of ${node.cnameFrom}` : 'Awaiting Redirection...')
                           : (isReached
-                              ? (node.geo?.org ? (node.geo.org.length > 25 ? `${node.geo.org.substring(0, 22)}...` : node.geo.org) : '')
+                              ? (node.geo?.org ? (cleanOrg(node.geo.org).length > 25 ? `${cleanOrg(node.geo.org).substring(0, 22)}...` : cleanOrg(node.geo.org)) : '')
                               : 'Awaiting Connection...')
                         }
                       </div>

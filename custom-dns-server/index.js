@@ -5,9 +5,8 @@ const { startHttpApi } = require("./api/http-api");
 const { loadRecords } = require("./lib/record-manager");
 const { cleanupExpiredSubdomains, loadDynamicSubdomains } = require("./lib/dynamic-records");
 
-/// const DNS_PORT = process.getuid && process.getuid() === 0 ? 53 : 5353;
-const DNS_PORT = 5354;
-const API_PORT = 8053;
+const DNS_PORT = process.env.DNS_PORT || 5354;
+const API_PORT = process.env.API_PORT || 8053;
 const RECORDS_PATH = path.join(__dirname, "config", "dns-records.json");
 
 async function startServer() {

@@ -16,6 +16,7 @@ const HOP_COLORS_MAP = {
 const cleanOrg = (org) => {
   if (!org) return '';
   return org
+    .replace(/^AS\d+\s+/g, '')
     .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
     .trim();
 };
