@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import CountryFlag from './CountryFlag';
 
 const NW = 130;
 const NH = 44;
@@ -593,8 +594,10 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     >
                       {/* Top line: flag + label + optional AA badge */}
                       <div className="flex items-center gap-1 w-full min-w-0">
-                        <span className="text-[10px] shrink-0 leading-none select-none">
-                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '⚠️' : isReached ? (node.geo?.flag || '🌐') : '🌐'}
+                        <span className="text-[10px] shrink-0 leading-none select-none flex items-center">
+                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '⚠️' : isReached ? (
+                            <CountryFlag countryCode={node.geo?.countryCode} fallbackFlag={node.geo?.flag} className="w-3.5 h-2.5" />
+                          ) : '🌐'}
                         </span>
                         <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
                           {node.label}
