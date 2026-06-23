@@ -2,16 +2,18 @@
  * geoip-service.js
  *
  * Resolves an IP address to geographical (country + city) and organisational metadata
- * using local MaxMind City & ASN binary databases. If the database is missing or fails,
- * it falls back to the ip-api.com public JSON API.
- * Results are cached in a simple LRU map (capped at MAX_CACHE_SIZE entries).
+ * by querying the ip-api.com public JSON API first for maximum accuracy.
+ * If the API is rate-limited, times out, or the system is offline, it gracefully
+ * falls back to resolving lookups locally using the MaxMind City & ASN binary databases.
  *
+ * Results are cached in a simple LRU map (capped at MAX_CACHE_SIZE entries).
  * Private/loopback addresses (127.x, 10.x, 192.168.x, 172.16–31.x) return
  * a local placeholder without making any network request or database lookup.
  */
 
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 const maxmind = require('maxmind');
 const logger = require('./logger');
 
@@ -23,6 +25,8 @@ const PRIVATE_IP_RE = [
   /^10\./,            // RFC 1918 class A
   /^192\.168\./,      // RFC 1918 class C
   /^172\.(1[6-9]|2\d|3[01])\./, // RFC 1918 class B (172.16–172.31)
+  /^169\.254\./,      // link-local
+  /^224\./,           // multicast
   /^::1$/,            // IPv6 loopback
   /^0\.0\.0\.0$/,
 ];
@@ -42,7 +46,7 @@ function countryCodeToFlag(code) {
     .join('');
 }
 
-// Open local MaxMind databases asynchronously
+// Open local MaxMind databases asynchronously for fallback use
 const CITY_DB_PATH = path.resolve(__dirname, 'data/geoip/GeoLite2-City.mmdb');
 const ASN_DB_PATH = path.resolve(__dirname, 'data/geoip/GeoLite2-ASN.mmdb');
 
@@ -60,7 +64,7 @@ const initPromise = (async () => {
           .catch(err => logger.warn(`Failed to open City database: ${err.message}`))
       );
     } else {
-      logger.warn(`GeoLite2-City.mmdb not found at ${CITY_DB_PATH}. Local City resolution is disabled.`);
+      logger.warn(`GeoLite2-City.mmdb not found at ${CITY_DB_PATH}. Local City resolution fallback is disabled.`);
     }
 
     if (fs.existsSync(ASN_DB_PATH)) {
@@ -70,12 +74,12 @@ const initPromise = (async () => {
           .catch(err => logger.warn(`Failed to open ASN database: ${err.message}`))
       );
     } else {
-      logger.warn(`GeoLite2-ASN.mmdb not found at ${ASN_DB_PATH}. Local ASN resolution is disabled.`);
+      logger.warn(`GeoLite2-ASN.mmdb not found at ${ASN_DB_PATH}. Local ASN resolution fallback is disabled.`);
     }
 
     if (openTasks.length > 0) {
       await Promise.all(openTasks);
-      logger.info('Local City GeoIP / ASN database readers initialized.');
+      logger.info('Local City GeoIP / ASN database readers initialized (configured as fallback).');
     }
   } catch (err) {
     logger.error(`Error during GeoIP databases initialization: ${err.message}`);
@@ -89,9 +93,21 @@ const initPromise = (async () => {
  * @returns {Promise<{flag, org, country, city, countryCode, isp}>}
  */
 async function lookupGeoIp(ip) {
-  // ── Local / private addresses ─────────────────────────────────────────────
-  if (!ip || isPrivateIp(ip)) {
-    const isLoopback = /^127\./.test(ip);
+  // ── 1. Validate IP address string ─────────────────────────────────────────
+  if (!ip || net.isIP(ip) === 0) {
+    return {
+      flag:        '🌐',
+      org:         'Unknown',
+      country:     'Unknown',
+      city:        null,
+      countryCode: null,
+      isp:         null,
+    };
+  }
+
+  // ── 2. Local / private addresses ──────────────────────────────────────────
+  if (isPrivateIp(ip)) {
+    const isLoopback = /^127\./.test(ip) || ip === '::1';
     return {
       flag:        isLoopback ? '🖥️' : '🌐',
       org:         isLoopback ? 'Local DNS Server' : 'Private Network',
@@ -110,10 +126,48 @@ async function lookupGeoIp(ip) {
     return cached;
   }
 
+  // ── 1. API-First Lookup (ip-api.com) ──────────────────────────────────────
+  try {
+    const response = await fetch(
+      `http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org`,
+      { signal: AbortSignal.timeout(2000) } // Keep timeout low for fast fallback response
+    );
+
+    if (!response.ok) {
+      throw new Error(`ip-api.com HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.status !== 'success') {
+      throw new Error(`ip-api.com failed for ${ip}: ${data.message || 'unknown message'}`);
+    }
+
+    const result = {
+      flag:        countryCodeToFlag(data.countryCode),
+      org:         data.org || data.isp || 'Unknown',
+      country:     data.country || 'Unknown',
+      city:        data.city || null,
+      countryCode: data.countryCode || null,
+      isp:         data.isp || null,
+    };
+
+    if (geoCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = geoCache.keys().next().value;
+      geoCache.delete(oldestKey);
+    }
+    geoCache.set(ip, result);
+
+    return result;
+
+  } catch (err) {
+    logger.warn({ err, ip }, `API GeoIP lookup failed for ${ip}, falling back to local MMDB: ${err.message}`);
+  }
+
   // Ensure database initialization promise has settled
   await initPromise;
 
-  // ── Attempt local MMDB lookup ─────────────────────────────────────────────
+  // ── 2. Fallback: Local MMDB lookup ────────────────────────────────────────
   if (cityReader || asnReader) {
     try {
       const cityData = cityReader ? cityReader.get(ip) : null;
@@ -156,57 +210,21 @@ async function lookupGeoIp(ip) {
 
         return result;
       }
-    } catch (err) {
-      logger.warn({ err, ip }, `Local MMDB lookup failed for ${ip}, falling back to network lookup: ${err.message}`);
+    } catch (dbErr) {
+      logger.error({ err: dbErr, ip }, `Local MMDB fallback lookup failed for ${ip}: ${dbErr.message}`);
     }
   }
 
-  // ── Network Fallback (ip-api.com lookup) ──────────────────────────────────
-  try {
-    logger.debug(`Performing network GeoIP lookup fallback for ${ip}`);
-    const response = await fetch(
-      `http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org`,
-      { signal: AbortSignal.timeout(3000) }
-    );
-
-    if (!response.ok) {
-      throw new Error(`ip-api.com HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.status !== 'success') {
-      throw new Error(`ip-api.com failed for ${ip}: ${data.message || 'unknown reason'}`);
-    }
-
-    const result = {
-      flag:        countryCodeToFlag(data.countryCode),
-      org:         data.org || data.isp || 'Unknown',
-      country:     data.country || 'Unknown',
-      city:        data.city || null,
-      countryCode: data.countryCode || null,
-      isp:         data.isp || null,
-    };
-
-    if (geoCache.size >= MAX_CACHE_SIZE) {
-      const oldestKey = geoCache.keys().next().value;
-      geoCache.delete(oldestKey);
-    }
-    geoCache.set(ip, result);
-
-    return result;
-
-  } catch (err) {
-    logger.warn({ err, ip }, `Network fallback GeoIP lookup failed for ${ip}: ${err.message}`);
-    return {
-      flag:        '🌐',
-      org:         'Unknown',
-      country:     'Unknown',
-      city:        null,
-      countryCode: null,
-      isp:         null,
-    };
-  }
+  // ── 3. Final Fallback (if both fail) ──────────────────────────────────────
+  const finalFallback = {
+    flag:        '🌐',
+    org:         'Unknown',
+    country:     'Unknown',
+    city:        null,
+    countryCode: null,
+    isp:         null,
+  };
+  return finalFallback;
 }
 
 module.exports = { lookupGeoIp };

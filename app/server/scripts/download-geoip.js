@@ -33,7 +33,7 @@ function downloadFile(fileUrl, outputPath) {
       }
     };
 
-    https.get(fileUrl, options, (response) => {
+    const req = https.get(fileUrl, options, (response) => {
       const { statusCode } = response;
 
       // Handle redirect (301 or 302)
@@ -71,7 +71,14 @@ function downloadFile(fileUrl, outputPath) {
         fs.unlink(tempPath, () => {}); // clean up partial temp file
         reject(err);
       });
-    }).on('error', (err) => {
+    });
+
+    // Prevent script hangs during network failures by timing out after 30 seconds
+    req.setTimeout(30000, () => {
+      req.destroy(new Error('GeoIP download request timed out after 30 seconds'));
+    });
+
+    req.on('error', (err) => {
       reject(err);
     });
   });
