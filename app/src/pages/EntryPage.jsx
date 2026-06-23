@@ -445,11 +445,10 @@ export default function EntryPage() {
                                   handleRecentQueryClick(q);
                                 }}
                                 onMouseEnter={() => setHighlightedIndex(idx)}
-                                className={`w-full flex items-center justify-between px-3.5 py-2 border-b last:border-b-0 border-ink/5 font-mono text-[9px] cursor-pointer transition-colors ${
-                                  isHighlighted
-                                    ? 'bg-ink/[0.03] text-ink font-semibold'
-                                    : 'text-ink/70 hover:bg-ink/[0.01]'
-                                }`}
+                                className={`w-full flex items-center justify-between px-3.5 py-2 border-b last:border-b-0 border-ink/5 font-mono text-[9px] cursor-pointer transition-colors ${isHighlighted
+                                  ? 'bg-ink/[0.03] text-ink font-semibold'
+                                  : 'text-ink/70 hover:bg-ink/[0.01]'
+                                  }`}
                               >
                                 <span className="flex items-center gap-2">
                                   <span className={`w-1 h-1 rounded-full transition-all duration-200 ${isHighlighted ? 'bg-accent scale-100' : 'bg-transparent scale-0'}`}></span>

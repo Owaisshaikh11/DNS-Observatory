@@ -43,6 +43,53 @@ const CORS_ORIGINS = [
   'http://127.0.0.1:5173',
 ];
 
+if (process.env.CORS_ORIGINS) {
+  const envOrigins = process.env.CORS_ORIGINS.split(',')
+    .map(o => o.trim())
+    .filter(o => o.length > 0);
+  CORS_ORIGINS.push(...envOrigins);
+}
+
+// In-memory sliding window rate limiter for /api/dns/*
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = 100; // 100 requests per window
+const ipRequests = new Map(); // key: ip -> value: array of timestamps (numbers)
+
+// Periodically clean up expired IPs to avoid memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, timestamps] of ipRequests.entries()) {
+    const validTimestamps = timestamps.filter(time => now - time < RATE_LIMIT_WINDOW_MS);
+    if (validTimestamps.length === 0) {
+      ipRequests.delete(ip);
+    } else {
+      ipRequests.set(ip, validTimestamps);
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
+function apiRateLimiter(req, res, next) {
+  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const now = Date.now();
+
+  if (!ipRequests.has(ip)) {
+    ipRequests.set(ip, []);
+  }
+
+  const timestamps = ipRequests.get(ip);
+  const activeTimestamps = timestamps.filter(time => now - time < RATE_LIMIT_WINDOW_MS);
+
+  if (activeTimestamps.length >= RATE_LIMIT_MAX) {
+    return res.status(429).json({
+      error: 'Too many requests from this IP, please try again after 15 minutes'
+    });
+  }
+
+  activeTimestamps.push(now);
+  ipRequests.set(ip, activeTimestamps);
+  next();
+}
+
 async function start() {
   // ── 1. Start the custom DNS server ─────────────────────────────────────────
   loadRecords(DNS_RECORDS_PATH);
@@ -55,9 +102,10 @@ async function start() {
   const app = express();
   const httpServer = http.createServer(app);
 
-  app.use(pinoHttp({ logger }));
   app.use(cors({ origin: CORS_ORIGINS }));
+  app.use(pinoHttp({ logger }));
   app.use(express.json());
+  app.use('/api/dns/', apiRateLimiter);
 
   // ── API Routes ─────────────────────────────────────────────────────────────
 
@@ -71,41 +119,43 @@ async function start() {
    * Returns a TraceResult object (see dns-iterative.js for the full shape).
    */
   app.post('/api/dns/trace', async (req, res) => {
-    const { domain, type = 'A', resolver } = req.body || {};
-
-    if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
-      return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
-    }
-
-    // Sanitise: lowercase, remove trailing dot, reject obviously bad input
-    const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-    if (!/^[a-z0-9_]([a-z0-9\-_.]*[a-z0-9_])?$/.test(cleanDomain)) {
-      return res.status(400).json({ error: `"${domain}" is not a valid domain name` });
-    }
-
-    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV', 'ALL'];
-    const cleanType = String(type).toUpperCase().trim();
-    if (!allowedTypes.includes(cleanType)) {
-      return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
-    }
-
-    // Validate the resolver parameter
-    let cleanResolver = '1.1.1.1';
-    if (resolver && typeof resolver === 'string') {
-      const trimmed = resolver.trim();
-      const net = require('net');
-      if (net.isIP(trimmed)) {
-        cleanResolver = trimmed;
-      }
-    }
-
-    req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Initiating trace for ${cleanDomain} (${cleanType}) using resolver ${cleanResolver}`);
-
     try {
+      const { domain, type = 'A', resolver } = req.body || {};
+
+      if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
+        return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
+      }
+
+      // Sanitise: lowercase, remove trailing dot, reject obviously bad input
+      const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+      if (!/^[a-z0-9_]([a-z0-9\-_.]*[a-z0-9_])?$/.test(cleanDomain)) {
+        return res.status(400).json({ error: `"${domain}" is not a valid domain name` });
+      }
+
+      const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV', 'ALL'];
+      const cleanType = String(type).toUpperCase().trim();
+      if (!allowedTypes.includes(cleanType)) {
+        return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
+      }
+
+      // Validate the resolver parameter
+      let cleanResolver = '1.1.1.1';
+      if (resolver && typeof resolver === 'string') {
+        const trimmed = resolver.trim();
+        const net = require('net');
+        if (net.isIP(trimmed)) {
+          cleanResolver = trimmed;
+        }
+      }
+
+      req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Initiating trace for ${cleanDomain} (${cleanType}) using resolver ${cleanResolver}`);
+
       const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver);
       res.json(trace);
     } catch (err) {
-      req.log.error({ err, domain: cleanDomain, recordType: cleanType }, `Error executing trace for ${cleanDomain}`);
+      const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
+      const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
+      req.log.error({ err, domain: domainVal, recordType: typeVal }, `Error executing trace for ${domainVal}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -118,19 +168,33 @@ async function start() {
    * returns each resolver's latency, RCODE, and answer records.
    */
   app.post('/api/dns/benchmark', async (req, res) => {
-    const { domain, type = 'A' } = req.body || {};
-
-    if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
-      return res.status(400).json({ error: 'domain is required' });
-    }
-
-    req.log.info({ domain: domain.trim(), recordType: type }, `Initiating benchmark for ${domain.trim()} (${type})`);
-
     try {
-      const result = await benchmarkResolvers(domain.trim(), type);
+      const { domain, type = 'A' } = req.body || {};
+
+      if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
+        return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
+      }
+
+      // Sanitise: lowercase, remove trailing dot, reject obviously bad input
+      const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+      if (!/^[a-z0-9_]([a-z0-9\-_.]*[a-z0-9_])?$/.test(cleanDomain)) {
+        return res.status(400).json({ error: `"${domain}" is not a valid domain name` });
+      }
+
+      const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV', 'ALL'];
+      const cleanType = String(type).toUpperCase().trim();
+      if (!allowedTypes.includes(cleanType)) {
+        return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
+      }
+
+      req.log.info({ domain: cleanDomain, recordType: cleanType }, `Initiating benchmark for ${cleanDomain} (${cleanType})`);
+
+      const result = await benchmarkResolvers(cleanDomain, cleanType);
       res.json(result);
     } catch (err) {
-      req.log.error({ err, domain: domain.trim(), recordType: type }, `Error executing benchmark for ${domain.trim()}`);
+      const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
+      const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
+      req.log.error({ err, domain: domainVal, recordType: typeVal }, `Error executing benchmark for ${domainVal}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -142,25 +206,25 @@ async function start() {
    * Sends a raw UDP query to localhost:5354 to trigger telemetry collection.
    */
   app.post('/api/dns/inject', async (req, res) => {
-    const { domain, type = 'A' } = req.body || {};
-
-    if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
-      return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
-    }
-
-    const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-    const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV'];
-    const cleanType = String(type).toUpperCase().trim();
-    if (!allowedTypes.includes(cleanType)) {
-      return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
-    }
-
-    const { buildDnsQuery } = require('./dns-query-writer');
-    const dgram = require('dgram');
-    const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, SRV: 33 };
-    const typeNum = TYPE_NUMBERS[cleanType] || 1;
-
     try {
+      const { domain, type = 'A' } = req.body || {};
+
+      if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
+        return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
+      }
+
+      const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+      const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV'];
+      const cleanType = String(type).toUpperCase().trim();
+      if (!allowedTypes.includes(cleanType)) {
+        return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
+      }
+
+      const { buildDnsQuery } = require('./dns-query-writer');
+      const dgram = require('dgram');
+      const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, SRV: 33 };
+      const typeNum = TYPE_NUMBERS[cleanType] || 1;
+
       const queryBuffer = buildDnsQuery(cleanDomain, typeNum, { recursionDesired: true });
       const client = dgram.createSocket('udp4');
       client.send(queryBuffer, 5354, '127.0.0.1', (err) => {
@@ -172,12 +236,26 @@ async function start() {
         res.json({ success: true, message: `Injected UDP query to port 5354 for ${cleanDomain} (${cleanType})` });
       });
     } catch (err) {
-      req.log.error({ err, domain: cleanDomain, recordType: cleanType }, 'Injection build failed');
+      const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
+      const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
+      req.log.error({ err, domain: domainVal, recordType: typeVal }, 'Injection build failed');
       res.status(500).json({ error: err.message });
     }
   });
 
+  // ── API Catch-All (failsafe JSON 404 for unmatched /api/* routes) ──────────
+  app.all('/api/{*splat}', (req, res) => {
+    res.status(404).json({ error: 'API route not found' });
+  });
 
+  // ── Production Static Asset serving & SPA routing fallback ────────────────
+  if (process.env.NODE_ENV === 'production') {
+    const distPath = path.resolve(__dirname, '../dist');
+    app.use(express.static(distPath));
+    app.get('/{*splat}', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
 
   // ── Start listening ────────────────────────────────────────────────────────
   httpServer.listen(API_PORT, () => {

@@ -27,6 +27,7 @@ export const useTraceStore = create((set, get) => ({
   benchmarkData: null,
   isBenchmarking: false,
   traceData: null,
+  traceError: null,
   activeStep: 0,
   playbackState: 'IDLE', // IDLE | PLAYING | PAUSED | COMPLETE | NXDOMAIN
   isSlowMo: false,
@@ -70,6 +71,7 @@ export const useTraceStore = create((set, get) => ({
       playbackState: 'PLAYING',
       activeStep: 0,
       traceData: null,
+      traceError: null,
       selectedHop: null,
       benchmarkData: null,
       isBenchmarking: isBenchmarkMode,
@@ -83,15 +85,18 @@ export const useTraceStore = create((set, get) => ({
         body: JSON.stringify({ domain, type }),
         signal,
       })
-        .then(res => res.json())
-        .then(data => {
+        .then(async res => {
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || `HTTP error ${res.status}`);
+          }
           set({ benchmarkData: data, isBenchmarking: false });
           return data;
         })
         .catch(error => {
           if (error.name === 'AbortError') return null;
           console.error("Failed to run benchmark:", error);
-          set({ isBenchmarking: false });
+          set({ isBenchmarking: false, traceError: error.message });
           return null;
         });
     }
@@ -105,6 +110,10 @@ export const useTraceStore = create((set, get) => ({
       })
 
       const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP error ${response.status}`);
+      }
+
       set({
         traceData: data,
         playbackState: 'PLAYING'
@@ -129,7 +138,7 @@ export const useTraceStore = create((set, get) => ({
     } catch (error) {
       if (error.name === 'AbortError') return;
       console.error("Failed to start trace:", error)
-      set({ playbackState: 'IDLE', isBenchmarking: false })
+      set({ playbackState: 'IDLE', isBenchmarking: false, traceError: error.message })
     }
   },
 

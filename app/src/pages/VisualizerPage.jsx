@@ -78,6 +78,7 @@ export default function VisualizerPage() {
     domain,
     recordType,
     traceData,
+    traceError,
     activeStep,
     playbackState,
     isSlowMo,
@@ -325,6 +326,40 @@ export default function VisualizerPage() {
 
   // Loader / Loading State
   if (!traceData) {
+    if (traceError) {
+      return (
+        <div className="w-full h-full flex flex-col items-center justify-center bg-base brutalist-grid select-none px-6">
+          <div className="w-full max-w-md border-2 border-ink p-8 bg-white shadow-[8px_8px_0_0_#EF4444] flex flex-col gap-6">
+            <div className="flex justify-between items-center border-b border-ink/20 pb-4">
+              <h2 className="font-display font-black text-xl uppercase tracking-tighter leading-none text-red-500">
+                Query Failed
+              </h2>
+              <span className="font-mono text-[9px] text-error font-bold tracking-widest border border-error px-1 bg-red-50">
+                ERROR
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-3 font-mono text-[11px] leading-relaxed text-ink/80">
+              <div className="flex items-center gap-2">
+                <span className="text-red-500 font-bold">✕</span>
+                <span className="font-bold">{traceError.toUpperCase()}</span>
+              </div>
+              <p className="font-sans text-[11px] text-ink/65 mt-2">
+                The query could not be completed. If this is a rate-limiting message (HTTP 429), please wait a few minutes before trying again. Otherwise, check that the domain name is valid.
+              </p>
+            </div>
+
+            <button
+              onClick={handleReset}
+              className="w-full py-3 border border-ink bg-ink text-base font-mono text-[11px] font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors duration-150 cursor-pointer shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-[2px] active:shadow-none"
+            >
+              ← Return to Dashboard
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="w-full h-full flex flex-col items-center justify-center bg-base brutalist-grid select-none px-6">
         <div className="w-full max-w-md border border-ink p-8 bg-base shadow-[4px_4px_0_0_#0D0D0D] flex flex-col gap-6">
