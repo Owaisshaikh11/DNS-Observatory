@@ -19,7 +19,7 @@
     "commit": "cz",
     "release": "commit-and-tag-version",
     "release:first": "commit-and-tag-version --first-release",
-    "prepare": "husky"
+    "prepare": "husky || exit 0"
   },
   "dependencies": {
     "concurrently": "^10.0.3"
