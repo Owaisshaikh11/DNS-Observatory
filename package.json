@@ -6,11 +6,16 @@
   "author": "Owais Shaikh",
   "type": "commonjs",
   "main": "index.js",
+  "workspaces": [
+    "app",
+    "custom-dns-server"
+  ],
   "scripts": {
     "dev": "concurrently --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"node app/server/index.js\" \"npm run dev --prefix app\"",
     "start:server": "node app/server/index.js",
     "start:app": "npm run dev --prefix app",
-    "start:dns": "node custom-dns-server/index.js"
+    "start:dns": "node custom-dns-server/index.js",
+    "build": "npm run build --workspace app"
   },
   "dependencies": {
     "concurrently": "^10.0.3"
