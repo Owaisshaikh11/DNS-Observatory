@@ -85,6 +85,11 @@ function downloadFile(fileUrl, outputPath) {
 }
 
 async function main() {
+  if (process.env.SKIP_GEOIP_DOWNLOAD === 'true') {
+    console.log('SKIP_GEOIP_DOWNLOAD is set to true. Skipping GeoIP / ASN database download.');
+    process.exit(0);
+  }
+
   console.log('Checking GeoIP / ASN local databases status...');
 
   // Ensure output directory exists
