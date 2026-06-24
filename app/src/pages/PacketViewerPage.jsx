@@ -131,14 +131,12 @@ export default function PacketViewerPage() {
 
   // Reset active parallel type when selected hop changes
   useEffect(() => {
-    const targetType = hasMultipleParallel ? currentHop.parallelQueries[0].type : null;
-    if (activeParallelType !== targetType) {
-      const timer = setTimeout(() => {
-        setActiveParallelType(targetType);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [selectedHopId, hasMultipleParallel, currentHop, activeParallelType]);
+    const targetType = hasMultipleParallel && currentHop ? currentHop.parallelQueries[0].type : null;
+    const timer = setTimeout(() => {
+      setActiveParallelType(prev => prev !== targetType ? targetType : prev);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [selectedHopId, hasMultipleParallel, currentHop]);
 
   // Resolve which request/response packet is active
   let activeQueryPacket = null;
@@ -165,13 +163,11 @@ export default function PacketViewerPage() {
   // Fallback to request tab if active response packet is missing/timed out
   useEffect(() => {
     const targetTab = (activeResponsePacket === null || isTimeout) ? 'REQUEST' : 'RESPONSE';
-    if (activeTab !== targetTab) {
-      const timer = setTimeout(() => {
-        setActiveTab(targetTab);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [selectedHopId, activeParallelType, isTimeout, activeResponsePacket, activeTab]);
+    const timer = setTimeout(() => {
+      setActiveTab(prev => prev !== targetTab ? targetTab : prev);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [selectedHopId, activeParallelType, isTimeout, activeResponsePacket]);
 
   // Helper to trigger hex highlight
   const hoverBytes = (start, end) => {
