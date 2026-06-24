@@ -1,6 +1,6 @@
 {
   "name": "custom-dns-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A custom DNS server with iterative resolution, dynamic records, and telemetry event hooks.",
   "main": "index.js",
   "directories": {

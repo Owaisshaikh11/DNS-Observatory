@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.0.1](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v1.0.0...v1.0.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **devops): fix(devops:** configure standard Vercel SPA routing and wildcard fallbacks ([fe1fd29](https://github.com/Owaisshaikh11/DNS-Observatory/commit/fe1fd294f7aa23f5d1e8df30c53643917a6da6a8))
+* **devops:** route unmatched paths to index.html for SPA router fallback ([1773f94](https://github.com/Owaisshaikh11/DNS-Observatory/commit/1773f94e8c418aa353b7f1193bcbcbbb82013180))
+* **devops:** use standard wildcard syntax for SPA rewrite fallback ([2dbf078](https://github.com/Owaisshaikh11/DNS-Observatory/commit/2dbf078295244eeffc1b628ece580c1f3e77ad76))
+* **frontend:** resolve packet viewer tab and batch selector flickering ([2b94a82](https://github.com/Owaisshaikh11/DNS-Observatory/commit/2b94a829c3fc078b9e02ec218bad37651822e092))
+
 ## 1.0.0 (2026-06-24)
 
 
