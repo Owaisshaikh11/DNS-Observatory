@@ -6,7 +6,7 @@
       "destination": "https://dns-observatory-backend.onrender.com/api/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ]
