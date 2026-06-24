@@ -55,6 +55,32 @@ function ErrorTelemetry({ isPanic }) {
 // Three stacked digit layers (4, 0, 4) with spring-driven mouse parallax,
 // outline trails, and panic mode clip-path glitch effects.
 
+const textBase =
+  'absolute w-full h-full font-display font-black leading-[0.8] select-none text-[35vw] md:text-[24vw] flex items-center justify-center';
+
+const RenderDigit = ({ digit, xSlow, ySlow, xMed, yMed, xFast, yFast, zIndex, extraClasses, isPanic }) => (
+  <div className={`relative w-[25vw] h-[25vw] md:w-[16vw] md:h-[16vw] ${zIndex} ${extraClasses}`}>
+    {/* Trailing outline layers */}
+    <motion.div style={{ x: xSlow, y: ySlow }} className={`${textBase} text-outline-ink opacity-20`}>{digit}</motion.div>
+    <motion.div style={{ x: xMed, y: yMed }} className={`${textBase} text-outline-accent opacity-40`}>{digit}</motion.div>
+
+    {/* Primary interactive layer */}
+    <motion.div style={{ x: xFast, y: yFast }} className="absolute w-full h-full">
+      {/* Standard idle view */}
+      <div className={`absolute w-full h-full flex items-center justify-center transition-opacity duration-100 ${isPanic ? 'opacity-0' : 'opacity-100'}`}>
+        <div className={`${textBase} text-solid-ink hover-hard-shadow cursor-crosshair`}>{digit}</div>
+      </div>
+
+      {/* Panic glitch view (visible only during panic) */}
+      <div className={`absolute w-full h-full flex items-center justify-center pointer-events-none transition-opacity duration-100 ${isPanic ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`${textBase} panic-layer-1`}>{digit}</div>
+        <div className={`${textBase} panic-layer-2`}>{digit}</div>
+        <div className={`${textBase} panic-text-shadow`}>{digit}</div>
+      </div>
+    </motion.div>
+  </div>
+);
+
 function Structural404({ mousePos, isPanic }) {
   // Spring configs — heavier = more mechanical lag
   const spFast = { damping: 30, stiffness: 200 };
@@ -85,32 +111,6 @@ function Structural404({ mousePos, isPanic }) {
   const n3xSlow = useSpring(mousePos.x * 85, spSlow);
   const n3ySlow = useSpring(mousePos.y * 85, spSlow);
 
-  const textBase =
-    'absolute w-full h-full font-display font-black leading-[0.8] select-none text-[35vw] md:text-[24vw] flex items-center justify-center';
-
-  const RenderDigit = ({ digit, xSlow, ySlow, xMed, yMed, xFast, yFast, zIndex, extraClasses }) => (
-    <div className={`relative w-[25vw] h-[25vw] md:w-[16vw] md:h-[16vw] ${zIndex} ${extraClasses}`}>
-      {/* Trailing outline layers */}
-      <motion.div style={{ x: xSlow, y: ySlow }} className={`${textBase} text-outline-ink opacity-20`}>{digit}</motion.div>
-      <motion.div style={{ x: xMed, y: yMed }} className={`${textBase} text-outline-accent opacity-40`}>{digit}</motion.div>
-
-      {/* Primary interactive layer */}
-      <motion.div style={{ x: xFast, y: yFast }} className="absolute w-full h-full">
-        {/* Standard idle view */}
-        <div className={`absolute w-full h-full flex items-center justify-center transition-opacity duration-100 ${isPanic ? 'opacity-0' : 'opacity-100'}`}>
-          <div className={`${textBase} text-solid-ink hover-hard-shadow cursor-crosshair`}>{digit}</div>
-        </div>
-
-        {/* Panic glitch view (visible only during panic) */}
-        <div className={`absolute w-full h-full flex items-center justify-center pointer-events-none transition-opacity duration-100 ${isPanic ? 'opacity-100' : 'opacity-0'}`}>
-          <div className={`${textBase} panic-layer-1`}>{digit}</div>
-          <div className={`${textBase} panic-layer-2`}>{digit}</div>
-          <div className={`${textBase} panic-text-shadow`}>{digit}</div>
-        </div>
-      </motion.div>
-    </div>
-  );
-
   return (
     <div className="relative w-full flex-1 flex items-center justify-center z-10 -mt-12 md:-mt-20">
       {/* Background pillars (falling staircase) */}
@@ -128,6 +128,7 @@ function Structural404({ mousePos, isPanic }) {
           xMed={n1xMed} yMed={n1yMed}
           xFast={n1xFast} yFast={n1yFast}
           zIndex="z-10" extraClasses="md:mr-[-4vw] md:-mt-[8vw]"
+          isPanic={isPanic}
         />
         <RenderDigit
           digit="0"
@@ -135,6 +136,7 @@ function Structural404({ mousePos, isPanic }) {
           xMed={n2xMed} yMed={n2yMed}
           xFast={n2xFast} yFast={n2yFast}
           zIndex="z-20" extraClasses="md:mt-[4vw]"
+          isPanic={isPanic}
         />
         <RenderDigit
           digit="4"
@@ -142,6 +144,7 @@ function Structural404({ mousePos, isPanic }) {
           xMed={n3xMed} yMed={n3yMed}
           xFast={n3xFast} yFast={n3yFast}
           zIndex="z-30" extraClasses="md:ml-[-4vw] md:mt-[16vw]"
+          isPanic={isPanic}
         />
       </div>
     </div>
@@ -159,12 +162,14 @@ export default function NotFoundPage() {
   const [isPanic, setIsPanic] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-  const lastMouse = useRef({ x: 0, y: 0, time: Date.now() });
+  const lastMouse = useRef(null);
   const panicTimer = useRef(null);
 
   useEffect(() => {
     // Update page title
     document.title = '404 NXDOMAIN | DNS Observatory';
+
+    lastMouse.current = { x: 0, y: 0, time: Date.now() };
 
     const handleMouseMove = (e) => {
       const now = Date.now();

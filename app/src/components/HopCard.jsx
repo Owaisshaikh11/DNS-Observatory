@@ -6,13 +6,6 @@ import RecordTable from './RecordTable';
 import HexViewer from './HexViewer';
 import CountryFlag from './CountryFlag';
 
-const HOP_COLORS_MAP = {
-  CLIENT: 'border-ink bg-muted text-ink',
-  LOCAL: 'border-ink bg-ink text-base',
-  ROOT: 'border-ink bg-ink text-base',
-  TLD: 'border-ink bg-ink text-base',
-  AUTH: 'border-accent bg-accent text-base',
-};
 
 const cleanOrg = (org) => {
   if (!org) return '';
@@ -22,27 +15,25 @@ const cleanOrg = (org) => {
     .trim();
 };
 
-export default function HopCard({ hop, index, totalLatency, isSelected, onSelect, secondsElapsed = 0, isReached = true, compact = false }) {
+export default function HopCard({ hop, totalLatency, isSelected, onSelect, secondsElapsed = 0, isReached = true, compact = false }) {
   const [expanded, setExpanded] = useState(false);
   const [showHex, setShowHex] = useState(false);
   const cardRef = useRef(null);
 
   const isClient = hop.type === 'CLIENT';
-  const hasResponse = hop.response && (
-    (hop.response.answers && hop.response.answers.length > 0) ||
-    (hop.response.authority && hop.response.authority.length > 0) ||
-    (hop.response.additional && hop.response.additional.length > 0)
-  );
 
   // Auto-scroll and auto-expand when selected via SVG Tree node click
   useEffect(() => {
     if (isSelected && cardRef.current) {
       cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (!expanded && !isClient) {
-        setExpanded(true);
+      if (!isClient) {
+        const timer = setTimeout(() => {
+          setExpanded(true);
+        }, 0);
+        return () => clearTimeout(timer);
       }
     }
-  }, [isSelected]);
+  }, [isSelected, isClient]);
 
   const handleToggle = () => {
     if (!isClient && !compact) {

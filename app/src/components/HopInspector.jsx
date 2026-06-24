@@ -13,7 +13,7 @@ const renderIsp = (org) => {
   // Extract ASxxxxx prefix
   const match = org.match(/^(AS\d+)\s+(.+)$/);
   if (match) {
-    const [_, asn, name] = match;
+    const [, asn, name] = match;
     return (
       <span className="inline-flex items-center gap-1.5 align-middle select-all">
         <span className="px-1 py-[0.5px] border border-ink/20 text-ink/60 bg-ink/5 font-mono text-[7px] leading-none uppercase font-bold">

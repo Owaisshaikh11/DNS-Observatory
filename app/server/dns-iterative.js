@@ -183,10 +183,10 @@ async function performHop(ip, port, domain, typeNum, opts = {}) {
   const attempts = [];
   const start = Date.now();
   let rawResponse = null;
-  let latencyMs = 0;
-  let resolvedOverTcp = false;
-  let failureReason = null;
-  let parsed = null;
+  let latencyMs;
+  let resolvedOverTcp;
+  let failureReason;
+  let parsed;
 
   const udpStart = Date.now();
   try {
@@ -476,7 +476,6 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
     const typeNum = TYPE_NUMBERS[recordType.toUpperCase()] || TYPE_NUMBERS.A;
     const isFirst = depth === 0;
 
-    const suffix = isFirst ? '' : `-${depth}`;
     const clientHopId = `client-${clientCount++}`;
     const localHopId = `local-${localCount++}`;
 
@@ -512,10 +511,9 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
     // 2. LOCAL Hop
     let isLocalHit = false;
     let localParsed = null;
-    let localLatency = 0;
+    let localLatency;
     let localByteLength = 0;
     let localParallelQueries = [];
-    let localQueryPacket = null;
 
     try {
       const { parsed, latencyMs, byteLength, queryPacket, resolvedOverTcp, failureReason, attempts } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
@@ -525,7 +523,6 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
       localParsed = parsed;
       localLatency = latencyMs;
       localByteLength = byteLength;
-      localQueryPacket = queryPacket;
       cumulative += latencyMs;
 
       isLocalHit = parsed.isAuthoritative && parsed.answers.length > 0;
@@ -734,14 +731,13 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
         label = currentQueryServerZone;
       }
 
-      let parsed = null;
-      let latencyMs = 0;
-      let byteLength = 0;
-      let queryHex = '';
-      let queryPacket = null;
-      let resolvedOverTcp = false;
-      let failureReason = null;
-      let attempts = null;
+      let parsed;
+      let latencyMs;
+      let byteLength;
+      let queryPacket;
+      let resolvedOverTcp;
+      let failureReason;
+      let attempts;
 
       try {
         const hopResult = await performHop(
@@ -750,7 +746,6 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
         parsed = hopResult.parsed;
         latencyMs = hopResult.latencyMs;
         byteLength = hopResult.byteLength;
-        queryHex = hopResult.queryHex;
         queryPacket = hopResult.queryPacket;
         resolvedOverTcp = hopResult.resolvedOverTcp;
         failureReason = hopResult.failureReason;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTraceStore } from '../stores/useTraceStore';
@@ -49,7 +49,7 @@ export default function PacketViewerPage() {
   const hexViewerContainerRef = useRef(null);
 
   // 3. Computed Variables
-  const hops = traceData?.hops || [];
+  const hops = useMemo(() => traceData?.hops || [], [traceData]);
   const currentHop = hops.find(h => h.id === selectedHopId) || hops[0];
   const isVirtualHop = currentHop?.type === 'CLIENT' || currentHop?.type === 'CNAME_REDIRECT';
   const hasMultipleParallel = currentHop?.parallelQueries && currentHop.parallelQueries.length > 1;
@@ -131,12 +131,14 @@ export default function PacketViewerPage() {
 
   // Reset active parallel type when selected hop changes
   useEffect(() => {
-    if (hasMultipleParallel) {
-      setActiveParallelType(currentHop.parallelQueries[0].type);
-    } else {
-      setActiveParallelType(null);
+    const targetType = hasMultipleParallel ? currentHop.parallelQueries[0].type : null;
+    if (activeParallelType !== targetType) {
+      const timer = setTimeout(() => {
+        setActiveParallelType(targetType);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [selectedHopId, hasMultipleParallel, currentHop]);
+  }, [selectedHopId, hasMultipleParallel, currentHop, activeParallelType]);
 
   // Resolve which request/response packet is active
   let activeQueryPacket = null;
@@ -162,12 +164,14 @@ export default function PacketViewerPage() {
 
   // Fallback to request tab if active response packet is missing/timed out
   useEffect(() => {
-    if (activeResponsePacket === null || isTimeout) {
-      setActiveTab('REQUEST');
-    } else {
-      setActiveTab('RESPONSE');
+    const targetTab = (activeResponsePacket === null || isTimeout) ? 'REQUEST' : 'RESPONSE';
+    if (activeTab !== targetTab) {
+      const timer = setTimeout(() => {
+        setActiveTab(targetTab);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [selectedHopId, activeParallelType, isTimeout]);
+  }, [selectedHopId, activeParallelType, isTimeout, activeResponsePacket, activeTab]);
 
   // Helper to trigger hex highlight
   const hoverBytes = (start, end) => {

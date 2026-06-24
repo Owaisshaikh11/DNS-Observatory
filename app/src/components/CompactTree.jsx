@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import CountryFlag from './CountryFlag';
 
 const NW = 130;
@@ -47,7 +47,7 @@ const getLatencyColor = (latencyMs) => {
   return '#EF4444'; // red
 };
 
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, recordType }) {
+export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
   const columns = hops?.length || 1;
   const W = Math.max(850, columns * 240);
@@ -55,53 +55,58 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const paddingX = 30;
 
   // Dynamic layout calculations
-  const segments = [];
-  let currentSegment = [];
-  if (hops) {
-    for (const hop of hops) {
-      currentSegment.push(hop);
-      if (hop.type === 'CNAME_REDIRECT') {
-        segments.push(currentSegment);
-        currentSegment = [];
+  const segments = useMemo(() => {
+    const segs = [];
+    let currentSegment = [];
+    if (hops) {
+      for (const hop of hops) {
+        currentSegment.push(hop);
+        if (hop.type === 'CNAME_REDIRECT') {
+          segs.push(currentSegment);
+          currentSegment = [];
+        }
+      }
+      if (currentSegment.length > 0) {
+        segs.push(currentSegment);
       }
     }
-    if (currentSegment.length > 0) {
-      segments.push(currentSegment);
-    }
-  }
+    return segs;
+  }, [hops]);
 
-  const nodes = hops?.map((hop, index) => {
-    let treeX = paddingX;
-    if (columns > 1) {
-      treeX = paddingX + (index * (W - 2 * paddingX - NW)) / (columns - 1);
-    }
-
-    let treeY = 118; // default center (perfectly symmetric vertically)
-    if (hop.type === 'ROOT') {
-      treeY = 30;
-    } else if (hop.type === 'TLD') {
-      treeY = 206;
-    } else if (hop.type === 'AUTH') {
-      const segment = segments.find(seg => seg.some(h => h.id === hop.id)) || [];
-      const authHopsInSegment = segment.filter(h => h.type === 'AUTH');
-      const authIndex = authHopsInSegment.findIndex(h => h.id === hop.id);
-
-      if (authHopsInSegment.length === 1) {
-        treeY = 118;
-      } else if (authHopsInSegment.length > 1) {
-        const startY = 175;
-        const endY = 118;
-        treeY = startY + (authIndex * (endY - startY)) / (authHopsInSegment.length - 1);
+  const nodes = useMemo(() => {
+    return hops?.map((hop, index) => {
+      let treeX = paddingX;
+      if (columns > 1) {
+        treeX = paddingX + (index * (W - 2 * paddingX - NW)) / (columns - 1);
       }
-    }
 
-    return {
-      ...hop,
-      treeX,
-      treeY,
-      isPlaceholder: false,
-    };
-  }) || [];
+      let treeY = 118; // default center (perfectly symmetric vertically)
+      if (hop.type === 'ROOT') {
+        treeY = 30;
+      } else if (hop.type === 'TLD') {
+        treeY = 206;
+      } else if (hop.type === 'AUTH') {
+        const segment = segments.find(seg => seg.some(h => h.id === hop.id)) || [];
+        const authHopsInSegment = segment.filter(h => h.type === 'AUTH');
+        const authIndex = authHopsInSegment.findIndex(h => h.id === hop.id);
+
+        if (authHopsInSegment.length === 1) {
+          treeY = 118;
+        } else if (authHopsInSegment.length > 1) {
+          const startY = 175;
+          const endY = 118;
+          treeY = startY + (authIndex * (endY - startY)) / (authHopsInSegment.length - 1);
+        }
+      }
+
+      return {
+        ...hop,
+        treeX,
+        treeY,
+        isPlaceholder: false,
+      };
+    }) || [];
+  }, [hops, columns, W, segments]);
 
   const edgesToRender = edges || [];
 
@@ -117,7 +122,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const defaultScale = columns > 5 ? Math.max(0.4, 5 / columns) : 1;
 
   // Auto-centering helper
-  const centerCanvas = (targetScale) => {
+  const centerCanvas = useCallback((targetScale) => {
     if (!containerRef.current) return;
     const V_w = containerRef.current.clientWidth;
     const V_h = containerRef.current.clientHeight;
@@ -128,10 +133,10 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       x: V_w / 2 - (W / 2) * zoomScale,
       y: V_h / 2 - (H / 2) * zoomScale,
     });
-  };
+  }, [defaultScale, W]);
 
   // Focus and Zoom-in on a specific node
-  const focusNode = (nodeId, customScale = 1.25) => {
+  const focusNode = useCallback((nodeId, customScale = 1.25) => {
     if (!containerRef.current || !nodes || nodes.length === 0) return;
 
     const node = nodes.find((n) => n.id === nodeId);
@@ -148,7 +153,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       x: V_w / 2 - X_target * customScale,
       y: V_h / 2 - Y_target * customScale,
     });
-  };
+  }, [nodes]);
 
   // Zoom relative to the center of the viewport
   const zoomAboutCenter = (zoomFactor) => {
@@ -173,22 +178,32 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
 
   // Initialize: Center whole canvas on columns change
   useEffect(() => {
-    centerCanvas(defaultScale);
-  }, [columns, defaultScale]);
+    const timer = setTimeout(() => {
+      centerCanvas(defaultScale);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [columns, defaultScale, centerCanvas]);
 
   // Camera follow effect for active steps during playback
   useEffect(() => {
     if (hops && hops[activeStep]) {
-      focusNode(hops[activeStep].id, 1.25);
+      const id = hops[activeStep].id;
+      const timer = setTimeout(() => {
+        focusNode(id, 1.25);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [activeStep]);
+  }, [activeStep, hops, focusNode]);
 
   // Camera follow effect when selectedHop changes
   useEffect(() => {
     if (selectedHop) {
-      focusNode(selectedHop, 1.25);
+      const timer = setTimeout(() => {
+        focusNode(selectedHop, 1.25);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [selectedHop]);
+  }, [selectedHop, focusNode]);
 
   // Keep focus node centered during window resizes
   useEffect(() => {
@@ -202,7 +217,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [selectedHop, activeStep, scale, hops]);
+  }, [selectedHop, activeStep, scale, hops, focusNode, centerCanvas]);
 
   const handleWheel = (e) => {
     e.preventDefault();

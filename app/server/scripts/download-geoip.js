@@ -19,7 +19,7 @@ function isFileFresh(filePath) {
     const ageInMs = Date.now() - stats.mtimeMs;
     const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
     return ageInMs < sevenDaysInMs;
-  } catch (err) {
+  } catch {
     return false;
   }
 }
@@ -116,7 +116,7 @@ async function main() {
     if (!cityFresh) {
       // If the file exists but isn't fresh or is corrupted, remove it first
       if (fs.existsSync(CITY_DB_PATH)) {
-        try { fs.unlinkSync(CITY_DB_PATH); } catch (e) {}
+        try { fs.unlinkSync(CITY_DB_PATH); } catch { /* ignore */ }
       }
       console.log(`Downloading GeoLite2-City database from ${CITY_DB_URL}...`);
       await downloadFile(CITY_DB_URL, CITY_DB_PATH);
@@ -127,7 +127,7 @@ async function main() {
 
     if (!asnFresh) {
       if (fs.existsSync(ASN_DB_PATH)) {
-        try { fs.unlinkSync(ASN_DB_PATH); } catch (e) {}
+        try { fs.unlinkSync(ASN_DB_PATH); } catch { /* ignore */ }
       }
       console.log(`Downloading GeoLite2-ASN database from ${ASN_DB_URL}...`);
       await downloadFile(ASN_DB_URL, ASN_DB_PATH);

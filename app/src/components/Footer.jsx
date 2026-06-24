@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, forwardRef } from 'react';
-import { motion, useScroll, useTransform } from 'framer-motion';
 
 // ── ASCII Velocity Engine (Concept 07: Payload) ────────────────────────────
 // Renders the Payload logo shape in block characters with a randomizing
@@ -54,14 +53,17 @@ function AsciiFooterLogo({ isFast }) {
 // Entry page's scroll content for a natural scroll-into-view reveal.
 
 const Footer = forwardRef(function Footer({ scrollContainerRef, scrollY }, ref) {
-  let scrollProgress = 0;
-  if (scrollContainerRef?.current) {
-    const container = scrollContainerRef.current;
-    const maxScroll = container.scrollHeight - container.clientHeight;
-    if (maxScroll > 0) {
-      scrollProgress = Math.min(1, Math.max(0, container.scrollTop / maxScroll));
+  const [scrollProgress, setScrollProgress] = useState(0);
+
+  useEffect(() => {
+    if (scrollContainerRef?.current) {
+      const container = scrollContainerRef.current;
+      const maxScroll = container.scrollHeight - container.clientHeight;
+      if (maxScroll > 0) {
+        setScrollProgress(Math.min(1, Math.max(0, container.scrollTop / maxScroll)));
+      }
     }
-  }
+  }, [scrollContainerRef, scrollY]);
 
   // Kinetic Typography: text slides up and letter-spacing snaps tight on reveal
   const opacityVal = scrollProgress <= 0.7
