@@ -9,3 +9,7 @@ AGENTS.md
 skills-lock.json
 app/lint_output.json
 app/lint_output.txt
+
+# Local GeoIP / ASN MMDB databases
+app/server/data/geoip/
+

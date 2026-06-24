@@ -4,6 +4,7 @@ import FlagBadge from './FlagBadge';
 import WaterfallBar from './WaterfallBar';
 import RecordTable from './RecordTable';
 import HexViewer from './HexViewer';
+import CountryFlag from './CountryFlag';
 
 const HOP_COLORS_MAP = {
   CLIENT: 'border-ink bg-muted text-ink',
@@ -16,6 +17,7 @@ const HOP_COLORS_MAP = {
 const cleanOrg = (org) => {
   if (!org) return '';
   return org
+    .replace(/^AS\d+\s+/g, '')
     .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
     .trim();
 };
@@ -91,7 +93,11 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
           {/* Server Details */}
           <div className="flex flex-col gap-0.5 min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] select-none">{isClient ? '🖥️' : (hop.geo?.flag || '🌐')}</span>
+              <span className="text-[11px] select-none">
+                {isClient ? '🖥️' : (
+                  <CountryFlag countryCode={hop.geo?.countryCode} fallbackFlag={hop.geo?.flag} />
+                )}
+              </span>
               <span className={`font-display text-[9.5px] font-black uppercase tracking-tight truncate ${isSelected ? 'text-white' : 'text-ink'}`}>
                 {hop.label}
               </span>

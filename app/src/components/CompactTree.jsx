@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import CountryFlag from './CountryFlag';
 
 const NW = 130;
 const NH = 44;
@@ -7,6 +8,14 @@ const getCenter = (node) => ({
   x: node.treeX + NW / 2,
   y: node.treeY + NH / 2,
 });
+
+const cleanOrg = (org) => {
+  if (!org) return '';
+  return org
+    .replace(/^AS\d+\s+/g, '')
+    .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
+    .trim();
+};
 
 const simplifyLabel = (label) => {
   if (!label) return '';
@@ -585,8 +594,10 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     >
                       {/* Top line: flag + label + optional AA badge */}
                       <div className="flex items-center gap-1 w-full min-w-0">
-                        <span className="text-[10px] shrink-0 leading-none select-none">
-                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '⚠️' : isReached ? (node.geo?.flag || '🌐') : '🌐'}
+                        <span className="text-[10px] shrink-0 leading-none select-none flex items-center">
+                          {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '⚠️' : isReached ? (
+                            <CountryFlag countryCode={node.geo?.countryCode} fallbackFlag={node.geo?.flag} className="w-3.5 h-2.5" />
+                          ) : '🌐'}
                         </span>
                         <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
                           {node.label}
@@ -629,7 +640,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                           : isCname
                           ? (isReached ? `Alias of ${node.cnameFrom}` : 'Awaiting Redirection...')
                           : (isReached
-                              ? (node.geo?.org ? (node.geo.org.length > 25 ? `${node.geo.org.substring(0, 22)}...` : node.geo.org) : '')
+                              ? (node.geo?.org ? (cleanOrg(node.geo.org).length > 25 ? `${cleanOrg(node.geo.org).substring(0, 22)}...` : cleanOrg(node.geo.org)) : '')
                               : 'Awaiting Connection...')
                         }
                       </div>

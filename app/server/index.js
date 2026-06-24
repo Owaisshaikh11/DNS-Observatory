@@ -3,7 +3,7 @@
  *
  * Single Node.js process that runs:
  *   1. The custom DNS UDP server on port 5354
- *   2. The Express + Socket.io API server on port 4000
+ *   2. The Express API server on port 4000
  *
  * Running both in the same process lets the telemetry bridge subscribe
  * directly to the DNS server's EventEmitter and stream events to the
