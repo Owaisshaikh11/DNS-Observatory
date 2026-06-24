@@ -1,0 +1,15 @@
+services:
+  visualizer-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+      - "5354:5354/udp"
+    environment:
+      - NODE_ENV=production
+      - API_PORT=4000
+      - DNS_PORT=5354
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      - DNS_FORWARD_ENABLED=true
+      - DNS_UPSTREAM_SERVERS=8.8.8.8,1.1.1.1

@@ -31,7 +31,7 @@ function forwardQuery(msg) {
       if (socket) {
         try {
           socket.close();
-        } catch (err) {
+        } catch {
           // Ignore socket close errors
         }
         socket = null;

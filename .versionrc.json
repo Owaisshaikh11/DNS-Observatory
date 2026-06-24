@@ -1,0 +1,13 @@
+{
+  "bumpFiles": [
+    "package.json",
+    "package-lock.json",
+    "app/package.json",
+    "custom-dns-server/package.json"
+  ],
+  "packageFiles": [
+    "package.json",
+    "app/package.json",
+    "custom-dns-server/package.json"
+  ]
+}

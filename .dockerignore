@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+.git
+.agents
+.fallow
+dist
+**/dist
+npm-debug.log*
+.DS_Store
+Thumbs.db
+planning-docs

@@ -32,7 +32,7 @@ function writeDomainName(buffer, offset, domain) {
 
 function expandIPv6(ip) {
   const doubleColonIndex = ip.indexOf("::");
-  let segments = [];
+  let segments;
   
   if (doubleColonIndex !== -1) {
     const leftPart = ip.slice(0, doubleColonIndex);
@@ -67,7 +67,7 @@ function writeAnswer(buffer, offset, name, answer) {
 
   const dataOffset = offset + 2;
   // The length of the data field is written at offset for reserve space
-  let length = 0;
+  let length;
 
   switch (answer.type) {
     case TYPE_A: {

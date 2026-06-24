@@ -36,8 +36,6 @@ jest.mock("ioredis", () => {
 const {
   loadRecords,
   getRecordsSync,
-  addRecord,
-  removeRecord,
   cache
 } = require("../lib/record-manager");
 const {

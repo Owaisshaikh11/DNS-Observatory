@@ -17,7 +17,6 @@ const {
   TYPE_DS,
   TYPE_RRSIG,
   TYPE_DNSKEY,
-  CLASS_IN,
 } = require("./types");
 
 const { writeDomainName, writeAnswer } = require("./dns-writer");
@@ -575,7 +574,7 @@ function parseDnsResponse(buffer) {
 function createResponse(query, answers = [], rcode = 0) {
   // Allocating 4KB of binary space for the response
   const buffer = Buffer.alloc(4096);
-  let offset = 0;
+  let offset = 12;
 
   buffer.writeUInt16BE(query.header.id, 0);
   let flags = QR_MASK | AA_MASK | (query.header.flags & RD_MASK) | RA_MASK;
@@ -590,7 +589,6 @@ function createResponse(query, answers = [], rcode = 0) {
   buffer.writeUInt16BE(0, 6); // ANCount placeholder, written dynamically below
   buffer.writeUInt16BE(0, 8); // NSCount
   buffer.writeUInt16BE(hasEdns ? 1 : 0, 10); // ARCount (will be adjusted if truncated)
-  offset = 12;
 
   let questionName = "";
   if (qdCount > 0) {

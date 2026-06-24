@@ -1,5 +1,5 @@
 const { parseQuery, createResponse, createErrorResponse } = require("../lib/dns-parser");
-const { writeDomainName, writeAnswer, expandIPv6 } = require("../lib/dns-writer");
+const { writeDomainName, expandIPv6 } = require("../lib/dns-writer");
 const {
   TYPE_A,
   TYPE_AAAA,

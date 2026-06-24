@@ -15,12 +15,44 @@
     "start:server": "node app/server/index.js",
     "start:app": "npm run dev --prefix app",
     "start:dns": "node custom-dns-server/index.js",
-    "build": "npm run build --workspace app"
+    "build": "npm run build --workspace app",
+    "commit": "cz",
+    "release": "commit-and-tag-version",
+    "release:first": "commit-and-tag-version --first-release",
+    "prepare": "husky"
   },
   "dependencies": {
     "concurrently": "^10.0.3"
   },
   "devDependencies": {
-    "fallow": "^2.93.0"
+    "@commitlint/cli": "^19.7.0",
+    "@commitlint/config-conventional": "^19.6.0",
+    "@eslint/js": "^10.0.1",
+    "commit-and-tag-version": "^12.7.3",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "fallow": "^2.93.0",
+    "globals": "^17.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.3"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "lint-staged": {
+    "app/src/**/*.{js,jsx}": [
+      "eslint --fix"
+    ],
+    "app/server/**/*.js": [
+      "eslint --fix"
+    ],
+    "custom-dns-server/**/*.js": [
+      "eslint --fix"
+    ]
   }
 }
