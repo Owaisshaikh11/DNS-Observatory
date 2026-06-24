@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://dns-observatory-api.onrender.com/api/:path*"
+      "destination": "https://dns-observatory-backend.onrender.com/api/:path*"
     }
   ]
 }
