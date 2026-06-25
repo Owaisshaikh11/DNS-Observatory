@@ -1,0 +1,17 @@
+<svg width="420" height="200" viewBox="0 0 420 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Payload Logo Mark -->
+  <g transform="translate(178, 20)">
+    <path d="M 16 16 H 48 V 48" stroke="#0D0D0D" stroke-width="4" fill="none" stroke-linejoin="miter" stroke-linecap="square"/>
+    <path d="M 16 48 H 32" stroke="#0D0D0D" stroke-width="4" fill="none" stroke-linejoin="miter" stroke-linecap="square"/>
+    <rect x="24" y="24" width="16" height="16" fill="#FF4D00"/>
+  </g>
+
+  <!-- Project Name -->
+  <text x="210" y="120" text-anchor="middle" font-family="'Space Grotesk', 'Segoe UI', sans-serif" font-weight="900" font-size="32" fill="#0D0D0D" letter-spacing="-1.5">DNS OBSERVATORY</text>
+
+  <!-- Subtitle -->
+  <text x="210" y="148" text-anchor="middle" font-family="'JetBrains Mono', 'Consolas', monospace" font-weight="700" font-size="10" fill="#FF4D00" letter-spacing="4">RESOLUTION LAB</text>
+
+  <!-- Tagline -->
+  <text x="210" y="178" text-anchor="middle" font-family="'Inter', 'Segoe UI', sans-serif" font-weight="400" font-size="11" fill="#0D0D0D90">Interactive DNS resolution visualizer</text>
+</svg>
