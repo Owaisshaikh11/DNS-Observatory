@@ -15,7 +15,7 @@ const cleanOrg = (org) => {
     .trim();
 };
 
-export default function HopCard({ hop, totalLatency, isSelected, onSelect, secondsElapsed = 0, isReached = true, compact = false }) {
+export default function HopCard({ hop, totalLatency, isSelected, onSelect, secondsElapsed = 0, isReached = true, isCompleted = true, compact = false }) {
   const [expanded, setExpanded] = useState(false);
   const [showHex, setShowHex] = useState(false);
   const cardRef = useRef(null);
@@ -36,13 +36,13 @@ export default function HopCard({ hop, totalLatency, isSelected, onSelect, secon
   }, [isSelected, isClient]);
 
   const handleToggle = () => {
-    if (!isClient && !compact) {
+    if (!isClient && !compact && isCompleted) {
       setExpanded(!expanded);
     }
     onSelect(hop.id);
   };
 
-  const showDnssec = hop.response?.dnssec && (
+  const showDnssec = hop.response?.dnssec && isCompleted && (
     hop.response.dnssec.rrsigPresent ||
     hop.response.dnssec.dnskeyPresent ||
     hop.response.dnssec.dsPresent
@@ -92,7 +92,7 @@ export default function HopCard({ hop, totalLatency, isSelected, onSelect, secon
               <span className={`font-display text-[9.5px] font-black uppercase tracking-tight truncate ${isSelected ? 'text-white' : 'text-ink'}`}>
                 {hop.label}
               </span>
-              {hop.response?.flags?.includes('AA') && (
+              {hop.response?.flags?.includes('AA') && isCompleted && (
                 <span className={`font-mono text-[6.5px] px-0.5 font-bold select-none leading-none ${isSelected ? 'bg-base text-ink' : 'bg-accent text-white'}`}>
                   AUTH
                 </span>
@@ -118,7 +118,7 @@ export default function HopCard({ hop, totalLatency, isSelected, onSelect, secon
           </div>
 
           {/* Proportional Latency Bar */}
-          {hop.latencyMs > 0 ? (
+          {hop.latencyMs > 0 && isCompleted ? (
             <WaterfallBar
               latencyMs={hop.latencyMs}
               cumulativeMs={hop.cumulativeMs}
@@ -131,9 +131,9 @@ export default function HopCard({ hop, totalLatency, isSelected, onSelect, secon
           {/* RTT Display */}
           <div className="flex flex-col items-end gap-0.5 min-w-0">
             <div className={`font-mono text-[10px] font-bold text-right select-text ${isSelected ? 'text-white' : 'text-accent'}`}>
-              {hop.latencyMs}ms
+              {isCompleted ? `${hop.latencyMs}ms` : '--'}
             </div>
-            {hop.resolvedOverTcp && (
+            {hop.resolvedOverTcp && isCompleted && (
               <span className={`font-mono text-[6.5px] px-1 py-px border border-dashed select-none font-bold leading-none ${isSelected ? 'border-white/50 bg-white/10 text-white' : 'border-orange-500 bg-orange-500/5 text-orange-600'}`}>
                 TCP
               </span>
@@ -142,7 +142,7 @@ export default function HopCard({ hop, totalLatency, isSelected, onSelect, secon
 
           {/* Status + Expand Arrow */}
           <div className="text-right flex items-center justify-end select-none">
-            {hop.response?.rcode && (
+            {hop.response?.rcode && isCompleted ? (
               <span
                 className={`font-mono text-[8px] font-bold px-1.5 py-0.5 border ${isSelected
                     ? 'border-white/30 bg-white/10 text-white'
@@ -152,6 +152,10 @@ export default function HopCard({ hop, totalLatency, isSelected, onSelect, secon
                   }`}
               >
                 {hop.response.rcode}
+              </span>
+            ) : (
+              <span className="font-mono text-[8px] opacity-45 px-1.5 py-0.5 border border-dashed select-none text-ink/65">
+                PENDING
               </span>
             )}
           </div>

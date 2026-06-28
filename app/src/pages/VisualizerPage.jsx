@@ -99,6 +99,7 @@ export default function VisualizerPage() {
     toggleSlowMo,
     resolver,
     cancelPendingRequests,
+    completedAt,
   } = useTraceStore();
 
   const [secondsElapsed, setSecondsElapsed] = useState(0);
@@ -194,7 +195,8 @@ export default function VisualizerPage() {
     if (activeStep >= hops.length - 1) {
       const finalStatus = traceData.status || 'COMPLETE';
       useTraceStore.setState({
-        playbackState: finalStatus === 'NOERROR' ? 'COMPLETE' : finalStatus
+        playbackState: finalStatus === 'NOERROR' ? 'COMPLETE' : finalStatus,
+        completedAt: Date.now()
       });
       return;
     }
@@ -209,16 +211,32 @@ export default function VisualizerPage() {
 
   // Real-time TTL Countdown timer (ticks up seconds elapsed since completion)
   useEffect(() => {
-    if (playbackState !== 'COMPLETE') {
-      return;
+    let active = true;
+
+    if (!completedAt) {
+      const timer = setTimeout(() => {
+        if (active) setSecondsElapsed(0);
+      }, 0);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
     }
 
-    const timer = setInterval(() => {
-      setSecondsElapsed((s) => s + 1);
+    const initTimer = setTimeout(() => {
+      if (active) setSecondsElapsed(Math.floor((Date.now() - completedAt) / 1000));
+    }, 0);
+
+    const interval = setInterval(() => {
+      if (active) setSecondsElapsed(Math.floor((Date.now() - completedAt) / 1000));
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [playbackState]);
+    return () => {
+      active = false;
+      clearTimeout(initTimer);
+      clearInterval(interval);
+    };
+  }, [completedAt]);
 
   // Show Coach-Mark nudge tooltip once the first trace completes in this session
   useEffect(() => {
@@ -414,7 +432,7 @@ export default function VisualizerPage() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-ink/40">[-]</span>
-              <span>CONNECTING PROTOCOL: UDP PORT 5354</span>
+              <span>CONNECTING PROTOCOL: DNS UDP/TCP PORT 53</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-ink/40">[-]</span>
@@ -461,11 +479,25 @@ export default function VisualizerPage() {
     const rcode = hop.response?.rcode || 'PENDING';
     const isClient = hop.type === 'CLIENT' || hop.type === 'CNAME_REDIRECT';
 
+    const targetDisplay = (() => {
+      if (hop.type === 'LOCAL') {
+        const isCacheHit = hop.label && hop.label.includes('Cache Hit');
+        return isCacheHit ? 'LOCAL CACHE' : (hop.ip || '1.1.1.1');
+      }
+      if (hop.type === 'CLIENT') {
+        return 'LOCAL MACHINE';
+      }
+      if (hop.type === 'CNAME_REDIRECT') {
+        return 'CNAME ALIAS';
+      }
+      return hop.server ? `${hop.ip} (${hop.server})` : (hop.ip || 'UNKNOWN');
+    })();
+
     return (
       <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 select-none">
-        <div className="border border-ink bg-base p-1.5 flex flex-col font-mono text-[9px] gap-0.5 shadow-[1px_1px_0_0_#0D0D0D]">
-          <span className="opacity-40 uppercase text-[7.5px] font-bold">Uplink Port</span>
-          <span className="font-bold text-ink">{isClient ? 'LOCAL' : 'UDP : 5354'}</span>
+        <div className="border border-ink bg-base p-1.5 flex flex-col font-mono text-[9px] gap-0.5 shadow-[1px_1px_0_0_#0D0D0D] min-w-0" title={targetDisplay}>
+          <span className="opacity-40 uppercase text-[7.5px] font-bold">Target Server</span>
+          <span className="font-bold text-ink truncate">{targetDisplay}</span>
         </div>
         <div className="border border-ink bg-base p-1.5 flex flex-col font-mono text-[9px] gap-0.5 shadow-[1px_1px_0_0_#0D0D0D]">
           <span className="opacity-40 uppercase text-[7.5px] font-bold">Payload standard</span>
@@ -1175,6 +1207,7 @@ export default function VisualizerPage() {
                     onSelect={setSelectedHop}
                     secondsElapsed={secondsElapsed}
                     isReached={i <= activeStep}
+                    isCompleted={hop.type === 'LOCAL' ? (activeStep >= hops.length - 1) : (i <= activeStep)}
                     compact={true}
                   />
                 ))}
@@ -1238,7 +1271,11 @@ export default function VisualizerPage() {
 
               {/* Render inspector for selected or active hop */}
               <div className="flex-1 overflow-hidden">
-                <HopInspector hop={currentInspectedHop} secondsElapsed={secondsElapsed} />
+                <HopInspector 
+                  hop={currentInspectedHop} 
+                  secondsElapsed={secondsElapsed} 
+                  isCompleted={currentInspectedHop ? (currentInspectedHop.type === 'LOCAL' ? (activeStep >= hops.length - 1) : (hops.indexOf(currentInspectedHop) <= activeStep)) : true} 
+                />
               </div>
             </div>
           )}

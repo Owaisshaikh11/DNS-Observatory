@@ -24,7 +24,7 @@ const net = require('net');
 const logger = require('./logger');
 const { buildDnsQuery } = require('./dns-query-writer');
 const { parseDnsResponse } = require('./dns-response-parser');
-const { parseQuery } = require('./lib/dns-parser');
+const { parseQuery, createResponse } = require('./lib/dns-parser');
 const { lookupGeoIp } = require('./geoip-service');
 const ROOT_SERVERS = require('./root-hints');
 
@@ -451,7 +451,7 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
  * @param {string} recordType - Record type string (e.g. "A", "MX", "ALL")
  * @returns {Promise<TraceResult>}
  */
-async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') {
+async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', clientIp = '127.0.0.1') {
   const hops = [];
   const edges = [];
   let cumulative = 0;
@@ -486,7 +486,7 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
       type: 'CLIENT',
       label: isFirst ? 'Stub Resolver' : `Stub Resolver (${depth})`,
       server: null,
-      ip: '127.0.0.1',
+      ip: clientIp,
       port: null,
       latencyMs: 0,
       cumulativeMs: cumulative,
@@ -509,11 +509,6 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
     }
 
     // 2. Recursive Resolver Hop (Virtual Cache Check)
-    let isLocalHit = false;
-    let localParsed = null;
-    let localByteLength = 0;
-    let localParallelQueries = [];
-
     hops.push(buildHop({
       id: localHopId,
       step: hops.length,
@@ -538,69 +533,8 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
     }));
     edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
 
-    if (isLocalHit && localParsed) {
-      const authHopId = `auth-${authCount++}`;
-      edges.push({ from: localHopId, to: authHopId, label: 'Local authoritative answer' });
-
-      hops.push(buildHop({
-        id: authHopId,
-        step: hops.length,
-        type: 'AUTH',
-        label: isFirst ? 'Authoritative' : `Authoritative (${depth})`,
-        server: 'local-zone',
-        ip: '127.0.0.1:5354',
-        port: 5354,
-        latencyMs: 0,
-        cumulativeMs: cumulative,
-        parsed: localParsed,
-        geo: { flag: '🔐', org: 'Local Auth Zone' },
-        queryDomain: currentDomain,
-        description: `Local custom DNS served authoritative mapping directly.`,
-        byteLength: localByteLength,
-        queriedTypes: recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
-        parallelQueries: localParallelQueries,
-      }));
-
-      finalParsed = localParsed;
-
-      const cnameRec = localParsed.answers.find(r => r.typeName === 'CNAME' && r.name.replace(/\.$/, '').toLowerCase() === currentDomain);
-      if (cnameRec) {
-        const cnameTarget = String(cnameRec.value).replace(/\.$/, '').toLowerCase();
-        cnameChain.push({ from: currentDomain, to: cnameTarget });
-
-        const hasTargetIp = localParsed.answers.some(r => r.name.replace(/\.$/, '').toLowerCase() === cnameTarget && (r.typeName === 'A' || r.typeName === 'AAAA'));
-        if (!hasTargetIp) {
-          const cnameNodeId = `cname-${cnameCount++}`;
-          hops.push({
-            id: cnameNodeId,
-            step: hops.length,
-            type: 'CNAME_REDIRECT',
-            label: 'CNAME Redirect',
-            server: null,
-            ip: null,
-            port: null,
-            latencyMs: 0,
-            cumulativeMs: cumulative,
-            description: `CNAME alias detected: ${currentDomain} points to ${cnameTarget}. Following redirection.`,
-            geo: { flag: '🔗', org: 'CNAME Alias' },
-            queryDomain: currentDomain,
-            cnameFrom: currentDomain,
-            cnameTo: cnameTarget,
-            response: null,
-            queriedTypes: [recordType.toUpperCase()],
-            parallelQueries: null,
-          });
-          edges.push({ from: authHopId, to: cnameNodeId, label: 'CNAME Alias' });
-
-          currentDomain = cnameTarget;
-          depth++;
-          continue;
-        }
-      }
-      break;
-    }
-
     // 3. Iterative Tracing Start
+    let iterativeLatency = 0;
     const rootServer = ROOT_SERVERS[Math.floor(Math.random() * ROOT_SERVERS.length)];
     let currentQueryServerIp = rootServer.ipv4;
     let currentQueryServerName = rootServer.name;
@@ -709,7 +643,9 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
           attempts,
         }];
 
-        if (recordType.toUpperCase() === 'ALL' && !isNXDomain) {
+        const isCnameResponse = parsed.answers && parsed.answers.some(r => r.typeName === 'CNAME');
+
+        if (recordType.toUpperCase() === 'ALL' && !isNXDomain && !isCnameResponse) {
           const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
           const extraResults = await Promise.allSettled(
             extraTypes.map(t => performHop(currentQueryServerIp, 53, currentDomain, TYPE_NUMBERS[t], { dnssecOk: false }))
@@ -757,6 +693,8 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
         let description;
         if (isNXDomain) {
           description = `Server ${currentQueryServerName} (${currentQueryServerIp}) returned NXDOMAIN. Domain does not exist.`;
+        } else if (parsed.rcode !== 'NOERROR') {
+          description = `Server ${currentQueryServerName} (${currentQueryServerIp}) returned error response: ${parsed.rcode}.`;
         } else if (parsed.answers && parsed.answers.length > 0) {
           const first = parsed.answers[0];
           const valStr = typeof first.value === 'string' ? first.value : JSON.stringify(first.value);
@@ -876,6 +814,51 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
         previousNodeId = currentNodeId;
         nextReferralLabel = `NS ${refZoneLabel.startsWith('.') ? refZoneLabel : '.' + refZoneLabel} → ${ref.nsName}`;
         iterativeHopCount++;
+      }
+
+      iterativeLatency += latencyMs;
+    }
+
+    const localHopIndex = hops.findIndex(h => h.id === localHopId);
+    if (localHopIndex !== -1 && finalParsed) {
+      try {
+        const queryBuffer = buildDnsQuery(hops[localHopIndex].queryDomain, typeNum, { recursionDesired: true });
+        const queryHex = [...queryBuffer].map(b => b.toString(16).padStart(2, '0')).join(' ');
+        const queryPacket = parseQuery(queryBuffer);
+        queryPacket.rawHex = queryHex;
+
+        const mappedAnswers = (finalParsed.answers || []).map(ans => ({
+          type: ans.typeNum,
+          class: ans.class,
+          ttl: ans.ttl,
+          data: ans.value,
+        }));
+
+        const responseBuffer = createResponse(queryPacket, mappedAnswers, finalParsed.rcodeNum || 0);
+        const responseParsed = parseDnsResponse(responseBuffer);
+
+        hops[localHopIndex].latencyMs = iterativeLatency;
+        hops[localHopIndex].queryPacket = queryPacket;
+        hops[localHopIndex].response = {
+          id: responseParsed.id,
+          rawFlags: responseParsed.rawFlags,
+          flags: responseParsed.flags,
+          qdcount: responseParsed.qdcount,
+          ancount: responseParsed.ancount,
+          nscount: responseParsed.nscount,
+          arcount: responseParsed.arcount,
+          questions: responseParsed.questions,
+          rcode: responseParsed.rcode,
+          answers: responseParsed.answers,
+          authority: responseParsed.authority,
+          additional: responseParsed.additional,
+          dnssec: responseParsed.dnssec,
+          rawHex: responseParsed.rawHex,
+          byteLength: responseBuffer.length,
+        };
+        hops[localHopIndex].byteLength = responseBuffer.length;
+      } catch (err) {
+        logger.error(`[Iterative] Failed to serialize authentic query/response for LOCAL resolver hop: ${err.message}`);
       }
     }
   }

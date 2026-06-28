@@ -326,7 +326,7 @@ export default function EntryPage() {
               DNS SERVICES ONLINE
             </div>
             <div className="border-l border-ink/30 pl-3 ml-0.5 flex flex-col gap-1">
-              <span>LOCAL RESOLVER: 127.0.0.1:5354</span>
+              <span>LOCAL RESOLVER: ACTIVE (PORT 53)</span>
               <span>API ENDPOINT: 127.0.0.1:4000</span>
               <span>PACKET ENGINE: READY</span>
             </div>

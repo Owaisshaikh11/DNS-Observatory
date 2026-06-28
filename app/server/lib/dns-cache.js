@@ -38,13 +38,24 @@ class DnsCache {
 
     if (!entry) return null;
 
-    if (Date.now() >= entry.expiresAt) {
+    const now = Date.now();
+    if (now >= entry.expiresAt) {
       this.cache.delete(key);
       return null;
     }
 
+    // Refresh position for LRU
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+
+    const timeElapsedSec = Math.floor((now - entry.cachedAt) / 1000);
+    const adjustedAnswers = entry.answers.map(ans => {
+      const remaining = Math.max(0, ans.ttl - timeElapsedSec);
+      return { ...ans, ttl: remaining };
+    });
+
     return {
-      answers: entry.answers,
+      answers: adjustedAnswers,
       status: entry.status || 'NOERROR'
     };
   }
@@ -78,12 +89,19 @@ class DnsCache {
       originalTtl = 5;
     }
 
+    // LRU Eviction: Limit size to 500 entries
+    if (!this.cache.has(key) && this.cache.size >= 500) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+
     const expiresAt = Date.now() + originalTtl * 1000;
 
     this.cache.set(key, {
       answers,
       originalTtl,
       expiresAt,
+      cachedAt: Date.now(),
       status
     });
   }
@@ -121,10 +139,15 @@ class DnsCache {
         this.cache.delete(key);
       } else {
         const [domain, type] = key.split(':');
+        const timeElapsedSec = Math.floor((now - entry.cachedAt) / 1000);
+        const adjustedAnswers = entry.answers.map(ans => {
+          const remaining = Math.max(0, ans.ttl - timeElapsedSec);
+          return { ...ans, ttl: remaining };
+        });
         active.push({
           domain,
           type,
-          answers: entry.answers,
+          answers: adjustedAnswers,
           originalTtl: entry.originalTtl,
           expiresAt: entry.expiresAt,
           ttlRemaining: Math.max(0, Math.ceil((entry.expiresAt - now) / 1000)),

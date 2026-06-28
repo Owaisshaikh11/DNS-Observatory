@@ -17,6 +17,8 @@ const logger = require('./logger');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
 const dnsCache = require('./lib/dns-cache');
+const { buildDnsQuery } = require('./lib/dns-writer');
+const { parseQuery, parseDnsResponse, createResponse } = require('./lib/dns-parser');
 
 const API_PORT = process.env.API_PORT || 4000;
 
@@ -75,6 +77,36 @@ function apiRateLimiter(req, res, next) {
   next();
 }
 
+function maskIpAddress(ip) {
+  if (!ip) return '127.0.0.xx';
+  // If it's a standard loopback address, don't mask it or just return it as is
+  if (ip === '::1' || ip === '127.0.0.1' || ip === '::ffff:127.0.0.1') {
+    return '127.0.0.1';
+  }
+
+  // IPv4-mapped IPv6 address (e.g. ::ffff:192.0.2.128)
+  let cleanIp = ip;
+  if (ip.startsWith('::ffff:')) {
+    cleanIp = ip.substring(7);
+  }
+
+  if (cleanIp.includes('.')) {
+    // IPv4
+    const parts = cleanIp.split('.');
+    if (parts.length === 4) {
+      return `${parts[0]}.${parts[1]}.${parts[2]}.xx`;
+    }
+  } else if (cleanIp.includes(':')) {
+    // IPv6
+    const parts = cleanIp.split(':');
+    if (parts.length > 1) {
+      parts[parts.length - 1] = 'xx';
+      return parts.join(':');
+    }
+  }
+  return cleanIp;
+}
+
 async function start() {
   // ── Set up Express ─────────────────────────────────────────────────────────
   const app = express();
@@ -127,6 +159,11 @@ async function start() {
       }
 
       const bypass = bypassCache !== false; // defaults to true
+      const rawClientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+      const rawIp = typeof rawClientIp === 'string' && rawClientIp.includes(',')
+        ? rawClientIp.split(',')[0].trim()
+        : rawClientIp;
+      const maskedClientIp = maskIpAddress(rawIp);
 
       if (!bypass) {
         const cached = dnsCache.get(cleanDomain, cleanType);
@@ -146,13 +183,28 @@ async function start() {
           };
           const typeNum = TYPE_NUMBERS[cleanType] || 1;
 
+          const queryBuffer = buildDnsQuery(cleanDomain, typeNum, { recursionDesired: true });
+          const queryHex = [...queryBuffer].map(b => b.toString(16).padStart(2, '0')).join(' ');
+          const queryPacket = parseQuery(queryBuffer);
+          queryPacket.rawHex = queryHex;
+
+          const mappedAnswers = (cached.answers || []).map(ans => ({
+            type: ans.typeNum,
+            class: ans.class,
+            ttl: ans.ttl,
+            data: ans.value,
+          }));
+
+          const responseBuffer = createResponse(queryPacket, mappedAnswers, cached.status === 'NXDOMAIN' ? 3 : 0);
+          const responseParsed = parseDnsResponse(responseBuffer);
+
           const clientHop = {
             id: 'client-0',
             step: 0,
             type: 'CLIENT',
             label: 'Stub Resolver',
             server: null,
-            ip: '127.0.0.1',
+            ip: maskedClientIp,
             port: null,
             latencyMs: 0,
             cumulativeMs: 0,
@@ -174,40 +226,69 @@ async function start() {
             port: 53,
             latencyMs: 0,
             cumulativeMs: 0,
-            parsed: {
-              id: 0,
-              flags: ['QR', 'RD', 'RA'],
-              rawFlags: 0x8180,
-              opcode: 'QUERY',
-              opcodeNum: 0,
-              rcode: cached.status,
-              rcodeNum: cached.status === 'NXDOMAIN' ? 3 : 0,
-              qdcount: 1,
-              ancount: cached.answers.length,
-              nscount: 0,
-              arcount: 0,
-              questions: [{ name: cleanDomain, type: cleanType, typeNum, classNum: 1 }],
-              answers: cached.answers,
-              authority: [],
-              additional: [],
-              dnssec: { rrsigPresent: false, dnskeyPresent: false, dsPresent: false },
-              dnssecPresent: false,
-              rawHex: '',
+            queryPacket: {
+              id: queryPacket.id,
+              flags: queryPacket.flags,
+              rawFlags: queryPacket.rawFlags,
+              opcode: queryPacket.opcode,
+              rcode: queryPacket.rcode,
+              qdcount: queryPacket.qdcount,
+              questions: queryPacket.questions,
+              rawHex: queryPacket.rawHex,
+            },
+            response: {
+              id: responseParsed.id,
+              flags: responseParsed.flags,
+              rawFlags: responseParsed.rawFlags,
+              opcode: responseParsed.opcode,
+              opcodeNum: responseParsed.opcodeNum,
+              rcode: responseParsed.rcode,
+              rcodeNum: responseParsed.rcodeNum,
+              qdcount: responseParsed.qdcount,
+              ancount: responseParsed.ancount,
+              nscount: responseParsed.nscount,
+              arcount: responseParsed.arcount,
+              questions: responseParsed.questions,
+              answers: responseParsed.answers,
+              authority: responseParsed.authority,
+              additional: responseParsed.additional,
+              dnssec: responseParsed.dnssec,
+              dnssecPresent: responseParsed.dnssecPresent,
+              rawHex: responseParsed.rawHex,
+              byteLength: responseBuffer.length,
             },
             geo: { flag: '⚡', org: 'Recursive Resolver (Cached)', country: 'Cached', city: null, countryCode: null },
             queryDomain: cleanDomain,
             description: cached.status === 'NXDOMAIN'
               ? `Resolved instantly from Virtual Cache: Target domain does not exist (Negative Caching NXDOMAIN).`
               : `Resolved instantly from Virtual Cache. No external queries were made.`,
-            byteLength: 0,
+            byteLength: responseBuffer.length,
             queriedTypes: [cleanType],
             parallelQueries: [{
               type: cleanType,
               latencyMs: 0,
-              byteLength: 0,
+              byteLength: responseBuffer.length,
               rcode: cached.status,
-              queryPacket: null,
-              responsePacket: { answers: cached.answers },
+              queryPacket: {
+                id: queryPacket.id,
+                flags: queryPacket.flags,
+                rawFlags: queryPacket.rawFlags,
+                questions: queryPacket.questions,
+                rawHex: queryPacket.rawHex,
+              },
+              responsePacket: {
+                id: responseParsed.id,
+                flags: responseParsed.flags,
+                rawFlags: responseParsed.rawFlags,
+                rcode: responseParsed.rcode,
+                answers: responseParsed.answers,
+                questions: responseParsed.questions,
+                authority: responseParsed.authority,
+                additional: responseParsed.additional,
+                dnssec: responseParsed.dnssec,
+                dnssecPresent: responseParsed.dnssecPresent,
+                rawHex: responseParsed.rawHex,
+              },
               resolvedOverTcp: false,
               failureReason: null,
               attempts: [],
@@ -239,7 +320,7 @@ async function start() {
 
       req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Initiating trace for ${cleanDomain} (${cleanType}) using resolver ${cleanResolver}`);
 
-      const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver);
+      const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver, maskedClientIp);
 
       // Cache successful response OR negative cache NXDOMAIN response
       if (trace.status === 'NOERROR' && trace.answers && trace.answers.length > 0) {
