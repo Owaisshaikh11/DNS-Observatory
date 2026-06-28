@@ -19,6 +19,9 @@ const cleanOrg = (org) => {
 
 const simplifyLabel = (label) => {
   if (!label) return '';
+  if (label.includes('Cache Hit')) {
+    return 'Cache Hit';
+  }
   if (label.startsWith('Query ')) {
     const parts = label.split(' ');
     const type = parts[parts.length - 1] || 'ALL';
@@ -47,7 +50,7 @@ const getLatencyColor = (latencyMs) => {
   return '#EF4444'; // red
 };
 
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState }) {
+export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
   const columns = hops?.length || 1;
   const W = Math.max(850, columns * 240);
@@ -189,27 +192,37 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     if (hops && hops[activeStep]) {
       const id = hops[activeStep].id;
       const timer = setTimeout(() => {
-        focusNode(id, 1.25);
+        if (isCacheHit) {
+          centerCanvas(1.0);
+        } else {
+          focusNode(id, 1.25);
+        }
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [activeStep, hops, focusNode]);
+  }, [activeStep, hops, focusNode, isCacheHit, centerCanvas]);
 
   // Camera follow effect when selectedHop changes
   useEffect(() => {
     if (selectedHop) {
       const timer = setTimeout(() => {
-        focusNode(selectedHop, 1.25);
+        if (isCacheHit) {
+          centerCanvas(1.0);
+        } else {
+          focusNode(selectedHop, 1.25);
+        }
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [selectedHop, focusNode]);
+  }, [selectedHop, focusNode, isCacheHit, centerCanvas]);
 
   // Keep focus node centered during window resizes
   useEffect(() => {
     const handleResize = () => {
       const targetId = selectedHop || (hops && hops[activeStep]?.id);
-      if (targetId) {
+      if (isCacheHit) {
+        centerCanvas(1.0);
+      } else if (targetId) {
         focusNode(targetId, scale);
       } else {
         centerCanvas(scale);
@@ -217,7 +230,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [selectedHop, activeStep, scale, hops, focusNode, centerCanvas]);
+  }, [selectedHop, activeStep, scale, hops, focusNode, centerCanvas, isCacheHit]);
 
   const handleWheel = (e) => {
     e.preventDefault();
@@ -316,11 +329,15 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
             const cpY = fc.y === tc.y ? fc.y + 1 : (fc.y + tc.y) / 2 + 3;
 
             const isFinalFailedEdge = isFailedTrace && toNode.id === (hops[hops.length - 1]?.id);
-            const strokeColor = isActive
+            let strokeColor = isActive
               ? isFinalFailedEdge
                 ? '#EF4444'
                 : getLatencyColor(toNode.latencyMs)
               : 'rgba(13,13,13,0.1)';
+
+            if (isCacheHit && isActive && toNode.type === 'LOCAL') {
+              strokeColor = '#22C55E'; // success green highlight
+            }
             const dotColor = strokeColor;
 
             const isHovered = activeTooltip?.edge === edge;

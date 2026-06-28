@@ -16,6 +16,7 @@ const pinoHttp = require('pino-http');
 const logger = require('./logger');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
+const dnsCache = require('./lib/dns-cache');
 
 const API_PORT = process.env.API_PORT || 4000;
 
@@ -97,7 +98,7 @@ async function start() {
    */
   app.post('/api/dns/trace', async (req, res) => {
     try {
-      const { domain, type = 'A', resolver } = req.body || {};
+      const { domain, type = 'A', resolver, bypassCache } = req.body || {};
 
       if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
         return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
@@ -125,14 +126,178 @@ async function start() {
         }
       }
 
+      const bypass = bypassCache !== false; // defaults to true
+
+      if (!bypass) {
+        const cached = dnsCache.get(cleanDomain, cleanType);
+        if (cached) {
+          req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Cache HIT for trace query ${cleanDomain} (${cleanType})`);
+
+          const TYPE_NUMBERS = {
+            A: 1,
+            NS: 2,
+            CNAME: 5,
+            SOA: 6,
+            PTR: 12,
+            MX: 15,
+            TXT: 16,
+            AAAA: 28,
+            SRV: 33,
+          };
+          const typeNum = TYPE_NUMBERS[cleanType] || 1;
+
+          const clientHop = {
+            id: 'client-0',
+            step: 0,
+            type: 'CLIENT',
+            label: 'Stub Resolver',
+            server: null,
+            ip: '127.0.0.1',
+            port: null,
+            latencyMs: 0,
+            cumulativeMs: 0,
+            parsed: null,
+            geo: { flag: '💻', org: 'Local Machine', country: 'Local', city: null, countryCode: null },
+            queryDomain: cleanDomain,
+            description: `Initiating trace for cached domain ${cleanDomain} (Cache Hit).`,
+            queriedTypes: [cleanType],
+            parallelQueries: null,
+          };
+
+          const localHop = {
+            id: 'local-0',
+            step: 1,
+            type: 'LOCAL',
+            label: 'Recursive Resolver (Cache Hit)',
+            server: 'dns-resolver',
+            ip: cleanResolver,
+            port: 53,
+            latencyMs: 0,
+            cumulativeMs: 0,
+            parsed: {
+              id: 0,
+              flags: ['QR', 'RD', 'RA'],
+              rawFlags: 0x8180,
+              opcode: 'QUERY',
+              opcodeNum: 0,
+              rcode: cached.status,
+              rcodeNum: cached.status === 'NXDOMAIN' ? 3 : 0,
+              qdcount: 1,
+              ancount: cached.answers.length,
+              nscount: 0,
+              arcount: 0,
+              questions: [{ name: cleanDomain, type: cleanType, typeNum, classNum: 1 }],
+              answers: cached.answers,
+              authority: [],
+              additional: [],
+              dnssec: { rrsigPresent: false, dnskeyPresent: false, dsPresent: false },
+              dnssecPresent: false,
+              rawHex: '',
+            },
+            geo: { flag: '⚡', org: 'Recursive Resolver (Cached)', country: 'Cached', city: null, countryCode: null },
+            queryDomain: cleanDomain,
+            description: cached.status === 'NXDOMAIN'
+              ? `Resolved instantly from Virtual Cache: Target domain does not exist (Negative Caching NXDOMAIN).`
+              : `Resolved instantly from Virtual Cache. No external queries were made.`,
+            byteLength: 0,
+            queriedTypes: [cleanType],
+            parallelQueries: [{
+              type: cleanType,
+              latencyMs: 0,
+              byteLength: 0,
+              rcode: cached.status,
+              queryPacket: null,
+              responsePacket: { answers: cached.answers },
+              resolvedOverTcp: false,
+              failureReason: null,
+              attempts: [],
+            }],
+          };
+
+          const traceResult = {
+            domain: cleanDomain,
+            recordType: cleanType,
+            status: cached.status,
+            totalLatency: 0,
+            dnssecPresent: cached.answers.some(ans => ans.typeName === 'RRSIG' || ans.typeName === 'DS' || ans.typeName === 'DNSKEY'),
+            answers: cached.answers,
+            cnameChain: [],
+            authZone: null,
+            authNs: null,
+            hopCount: 2,
+            hops: [clientHop, localHop],
+            edges: [
+              { from: 'client-0', to: 'local-0', label: 'Cache Hit (0ms)' }
+            ],
+            timestamp: Date.now(),
+            isCacheHit: true
+          };
+
+          return res.json(traceResult);
+        }
+      }
+
       req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Initiating trace for ${cleanDomain} (${cleanType}) using resolver ${cleanResolver}`);
 
       const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver);
+
+      // Cache successful response OR negative cache NXDOMAIN response
+      if (trace.status === 'NOERROR' && trace.answers && trace.answers.length > 0) {
+        dnsCache.set(cleanDomain, cleanType, trace.answers, 'NOERROR');
+      } else if (trace.status === 'NXDOMAIN') {
+        dnsCache.set(cleanDomain, cleanType, [], 'NXDOMAIN');
+      }
+
       res.json(trace);
     } catch (err) {
       const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
       const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
       req.log.error({ err, domain: domainVal, recordType: typeVal }, `Error executing trace for ${domainVal}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/dns/cache
+   * Returns active cached entries.
+   */
+  app.get('/api/dns/cache', (req, res) => {
+    try {
+      res.json(dnsCache.getAllActive());
+    } catch (err) {
+      logger.error({ err }, 'Error retrieving active cache');
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * DELETE /api/dns/cache
+   * Evicts a single record.
+   */
+  app.delete('/api/dns/cache', (req, res) => {
+    try {
+      const { domain, type } = req.body || {};
+      if (!domain || !type) {
+        return res.status(400).json({ error: 'domain and type are required' });
+      }
+      const success = dnsCache.delete(domain, type);
+      res.json({ success });
+    } catch (err) {
+      logger.error({ err }, 'Error deleting cache entry');
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/dns/cache/clear
+   * Flushes the entire cache.
+   */
+  app.post('/api/dns/cache/clear', (req, res) => {
+    try {
+      dnsCache.clear();
+      res.json({ success: true });
+    } catch (err) {
+      logger.error({ err }, 'Error clearing cache');
       res.status(500).json({ error: err.message });
     }
   });

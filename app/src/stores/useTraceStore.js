@@ -36,6 +36,7 @@ export const useTraceStore = create((set, get) => ({
   resolver: '1.1.1.1 (Cloudflare)',
   activeAbortController: null,
   recentQueries: initialRecentQueries,
+  bypassCache: true,
 
   setDomain: (domain) => set({ domain }),
   setRecordType: (recordType) => set({ recordType }),
@@ -43,6 +44,7 @@ export const useTraceStore = create((set, get) => ({
   setBenchmarkData: (benchmarkData) => set({ benchmarkData }),
   setIsBenchmarking: (isBenchmarking) => set({ isBenchmarking }),
   setResolver: (resolver) => set({ resolver }),
+  setBypassCache: (bypassCache) => set({ bypassCache }),
 
   cancelPendingRequests: () => {
     const controller = get().activeAbortController;
@@ -105,7 +107,7 @@ export const useTraceStore = create((set, get) => ({
       const response = await fetch('/api/dns/trace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain, type, resolver: resolverIp }),
+        body: JSON.stringify({ domain, type, resolver: resolverIp, bypassCache: get().bypassCache }),
         signal,
       })
 

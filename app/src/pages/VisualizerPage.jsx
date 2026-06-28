@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Info } from 'lucide-react';
+import { Info, Database } from 'lucide-react';
 import { useTraceStore } from '../stores/useTraceStore';
 import CompactTree from '../components/CompactTree';
 import HopCard from '../components/HopCard';
 import HopInspector from '../components/HopInspector';
 import InteractiveGrid from '../components/InteractiveGrid';
+import CacheDrawer from '../components/CacheDrawer';
 import { formatRecordValue } from '../utils/dnsFormatter';
 
 const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
@@ -25,21 +26,27 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
       if (recTypeVal === 'ALL') {
         logLines.push({ time: timeStr, source: 'RFC-8482', text: `Notice: ANY query deprecated by RFC 8482. Resolving types A, AAAA, MX, TXT, NS in parallel.` });
       }
-      logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Local Resolver at ${hop.ip}` });
-    } else if (hop.type === 'LOCAL') {
-      if (!hop.response) {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Connection to Local DNS server failed. Bypassing local resolution.` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Querying DNS Root nameserver hints directly...` });
+      const nextHop = hopsArray[i + 1];
+      const isCacheHit = nextHop && nextHop.label && nextHop.label.includes('Cache Hit');
+      if (isCacheHit) {
+        logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending query to Recursive Resolver at ${nextHop.ip || '1.1.1.1'}` });
       } else {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking local cache & zone databases...` });
-        const answersList = hop.response.answers || [];
-        const isAuthoritative = hop.response.isAuthoritative || false;
-        if (isAuthoritative && answersList.length > 0) {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache hit! Found authoritative local zone mapping.` });
-          logLines.push({ time: timeStr, source: 'CLIENT', text: `Received response payload from local resolver: ${answersList.length} records resolved.` });
+        logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Recursive Resolver` });
+      }
+    } else if (hop.type === 'LOCAL') {
+      const isCacheHit = hop.label && hop.label.includes('Cache Hit');
+      if (isCacheHit) {
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking virtual caching resolver...` });
+        if (hop.response && hop.response.rcode === 'NXDOMAIN') {
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `Negative Cache Hit! Target domain does not exist (NXDOMAIN cached).` });
         } else {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache miss. Querying DNS Root nameserver hints...` });
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache Hit! Virtual caching resolver returned active record set from memory.` });
         }
+        const answersList = hop.response?.answers || [];
+        logLines.push({ time: timeStr, source: 'CLIENT', text: `Received response payload: ${answersList.length} records resolved. Iterative sequence completed.` });
+      } else {
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Query received by Recursive Resolver (${hop.ip}).` });
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `No active cache record found. Forwarding query to Root Authority hints...` });
       }
     } else if (hop.type === 'ROOT') {
       logLines.push({ time: timeStr, source: 'ROOT', text: `Querying Root Authority: ${hop.label} (${hop.ip})` });
@@ -55,7 +62,7 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
         logLines.push({ time: timeStr, source: 'AUTH', text: `NXDOMAIN response code returned. Requested domain target does not exist!` });
       } else {
         logLines.push({ time: timeStr, source: 'AUTH', text: `Final answer received (RCODE: ${rcode}, AA Flag: ${hop.response?.flags?.includes('AA') ? '1' : '0'}). Found ${answersCount} answers.` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. [Notice: Caching bypassed to demonstrate full resolution path]. Retransmitting payload to Client Stub.` });
+        logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. Retransmitting payload to Stub Resolver.` });
       }
     } else if (hop.type === 'CNAME_REDIRECT') {
       logLines.push({ time: timeStr, source: 'CNAME', text: `CNAME alias redirection: "${hop.cnameFrom.toUpperCase()}" -> "${hop.cnameTo.toUpperCase()}"` });
@@ -98,7 +105,15 @@ export default function VisualizerPage() {
   const [expandedGroups, setExpandedGroups] = useState({});
   const [showRawJson, setShowRawJson] = useState({});
   const [showLabNotes, setShowLabNotes] = useState(false);
+  const [isCacheOpen, setIsCacheOpen] = useState(false);
+  const [showNudge, setShowNudge] = useState(false);
   const consoleEndRef = useRef(null);
+
+  const handleToggleCacheDrawer = () => {
+    setIsCacheOpen((prev) => !prev);
+    setShowNudge(false);
+    sessionStorage.setItem('dns_cache_nudge_shown', 'true');
+  };
 
   // Split resizer and panel collapse overrides state
   const [waterfallHeight, setWaterfallHeight] = useState(45);
@@ -205,6 +220,25 @@ export default function VisualizerPage() {
     return () => clearInterval(timer);
   }, [playbackState]);
 
+  // Show Coach-Mark nudge tooltip once the first trace completes in this session
+  useEffect(() => {
+    let active = true;
+    if ((playbackState === 'COMPLETE' || playbackState === 'NXDOMAIN') && traceData && !traceData.isCacheHit) {
+      const shown = sessionStorage.getItem('dns_cache_nudge_shown') === 'true';
+      if (!shown) {
+        const timer = setTimeout(() => {
+          if (active) {
+            setShowNudge(true);
+          }
+        }, 50);
+        return () => {
+          active = false;
+          clearTimeout(timer);
+        };
+      }
+    }
+  }, [playbackState, traceData]);
+
   // Handle Playback Actions
   const handlePrev = useCallback(() => {
     if (activeStep > 0) {
@@ -287,6 +321,7 @@ export default function VisualizerPage() {
 
   // Trigger alternate query type
   const handleAppendQuery = (type) => {
+    setShowNudge(false);
     useTraceStore.setState({ recordType: type });
     useTraceStore.getState().startTrace(domain, type);
     setSecondsElapsed(0);
@@ -641,6 +676,49 @@ export default function VisualizerPage() {
             INSPECT PACKETS
           </button>
 
+          <div className="relative">
+            <button
+              onClick={handleToggleCacheDrawer}
+              className={`flex items-center gap-1.5 px-3 py-0.5 border font-bold hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-150 cursor-pointer ${
+                isCacheOpen
+                  ? 'bg-accent border-accent text-base font-black shadow-[2px_2px_0_0_#0D0D0D]'
+                  : 'border-ink bg-base text-ink'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              RESOLVER CACHE
+            </button>
+
+            {/* Coach-Mark Tooltip (The Nudge) */}
+            <AnimatePresence>
+              {showNudge && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                  className="absolute right-0 top-full mt-2.5 w-72 border-2 border-ink bg-[#FF4D00] text-ink p-3 shadow-[3px_3px_0_0_#0D0D0D] font-mono text-[9.5px] leading-relaxed z-50 flex flex-col gap-1 text-left"
+                >
+                  <div className="flex justify-between items-center border-b border-ink/20 pb-1 mb-1 font-display font-black text-[9.5px] uppercase tracking-wide">
+                    <span>Cache Ready!</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowNudge(false);
+                        sessionStorage.setItem('dns_cache_nudge_shown', 'true');
+                      }}
+                      className="text-ink/65 hover:text-ink cursor-pointer font-sans text-xs font-bold leading-none"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p className="font-sans font-medium text-[9.5px]">
+                    Record cached! Open the Cache Panel to toggle Cache Mode and test speed differences.
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           {/* Core Uplink Status */}
           <div className="flex items-center gap-2 w-20 justify-end select-none">
             <div className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
@@ -871,6 +949,7 @@ export default function VisualizerPage() {
                 activeStep={activeStep}
                 playbackState={playbackState}
                 recordType={recordType}
+                isCacheHit={traceData?.isCacheHit}
               />
             </div>
 
@@ -1166,6 +1245,12 @@ export default function VisualizerPage() {
         </section>
 
       </div>
+
+      <AnimatePresence>
+        {isCacheOpen && (
+          <CacheDrawer isOpen={isCacheOpen} onClose={() => setIsCacheOpen(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
