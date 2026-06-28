@@ -1,20 +1,11 @@
 /**
  * index.js — Visualizer Backend
  *
- * Single Node.js process that runs:
- *   1. The custom DNS UDP server on port 5354
- *   2. The Express API server on port 4000
- *
- * Running both in the same process lets the telemetry bridge subscribe
- * directly to the DNS server's EventEmitter and stream events to the
- * frontend over WebSocket — no IPC or polling needed.
+ * Single Node.js process that runs the Express API server on port 4000.
  *
  * API routes:
  *   POST /api/dns/trace      — full iterative trace for a domain/type
  *   POST /api/dns/benchmark  — Cloudflare vs Google latency comparison
- *
- * WebSocket events emitted to clients:
- *   dns:query                — every query that passes through the local DNS server
  */
 
 const path = require('path');
@@ -26,14 +17,7 @@ const logger = require('./logger');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
 
-// Pull in the custom DNS server from the sibling directory
-const { startDnsUdpServer } = require('../../custom-dns-server/server/dns-server');
-const { loadRecords } = require('../../custom-dns-server/lib/record-manager');
-const { loadDynamicSubdomains, cleanupExpiredSubdomains } = require('../../custom-dns-server/lib/dynamic-records');
-
 const API_PORT = process.env.API_PORT || 4000;
-const DNS_PORT = process.env.DNS_PORT || 5354;
-const DNS_RECORDS_PATH = path.resolve(__dirname, '../../custom-dns-server/config/dns-records.json');
 
 // Allow the Vite dev server and any localhost origin during development
 const CORS_ORIGINS = [
@@ -91,14 +75,7 @@ function apiRateLimiter(req, res, next) {
 }
 
 async function start() {
-  // ── 1. Start the custom DNS server ─────────────────────────────────────────
-  loadRecords(DNS_RECORDS_PATH);
-  loadDynamicSubdomains();
-
-  const dnsServer = startDnsUdpServer(DNS_PORT);
-  setInterval(cleanupExpiredSubdomains, 60_000);
-
-  // ── 2. Set up Express ──────────────────────────────────────────────────────
+  // ── Set up Express ─────────────────────────────────────────────────────────
   const app = express();
   const httpServer = http.createServer(app);
 
@@ -199,49 +176,7 @@ async function start() {
     }
   });
 
-  /**
-   * POST /api/dns/inject
-   * Body: { domain: string, type: string }
-   *
-   * Sends a raw UDP query to localhost:5354 to trigger telemetry collection.
-   */
-  app.post('/api/dns/inject', async (req, res) => {
-    try {
-      const { domain, type = 'A' } = req.body || {};
 
-      if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
-        return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
-      }
-
-      const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-      const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV'];
-      const cleanType = String(type).toUpperCase().trim();
-      if (!allowedTypes.includes(cleanType)) {
-        return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
-      }
-
-      const { buildDnsQuery } = require('./dns-query-writer');
-      const dgram = require('dgram');
-      const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, SRV: 33 };
-      const typeNum = TYPE_NUMBERS[cleanType] || 1;
-
-      const queryBuffer = buildDnsQuery(cleanDomain, typeNum, { recursionDesired: true });
-      const client = dgram.createSocket('udp4');
-      client.send(queryBuffer, 5354, '127.0.0.1', (err) => {
-        client.close();
-        if (err) {
-          req.log.error({ err, domain: cleanDomain, recordType: cleanType }, 'Failed to inject mock query');
-          return res.status(500).json({ error: `Failed to inject query: ${err.message}` });
-        }
-        res.json({ success: true, message: `Injected UDP query to port 5354 for ${cleanDomain} (${cleanType})` });
-      });
-    } catch (err) {
-      const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
-      const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
-      req.log.error({ err, domain: domainVal, recordType: typeVal }, 'Injection build failed');
-      res.status(500).json({ error: err.message });
-    }
-  });
 
   // ── API Catch-All (failsafe JSON 404 for unmatched /api/* routes) ──────────
   app.all('/api/{*splat}', (req, res) => {
@@ -260,15 +195,13 @@ async function start() {
   // ── Start listening ────────────────────────────────────────────────────────
   httpServer.listen(API_PORT, () => {
     logger.info(`Visualizer backend running at http://localhost:${API_PORT}`);
-    logger.info(`Custom DNS server running on UDP port ${DNS_PORT}`);
   });
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   process.on('SIGINT', () => {
-    logger.info('Closing servers...');
-    dnsServer.close();
+    logger.info('Closing server...');
     httpServer.close(() => {
-      logger.info('Servers closed. Goodbye!');
+      logger.info('Server closed. Goodbye!');
       process.exit(0);
     });
   });

@@ -136,7 +136,6 @@ flowchart TB
     subgraph API["API Server — Express 5, Port 4000"]
         R1["POST /api/dns/trace"] --> IT["iterativeTrace()"]
         R2["POST /api/dns/benchmark"] --> BR["benchmarkResolvers()"]
-        R3["POST /api/dns/inject"] --> INJ["UDP inject to local DNS"]
 
         subgraph ENGINE["dns-iterative.js — Core Engine"]
             IT --> BQ["buildDnsQuery()"]
@@ -148,17 +147,7 @@ flowchart TB
     end
 
     SQ -- "UDP port 53 queries" --> DNS_PUB["Root Servers\nTLD Servers\nAuth Servers"]
-
-    API -- "Same Node.js process" --> CDNS
-
-    subgraph CDNS["Custom DNS Server — UDP Port 5354"]
-        DP["dns-parser.js\nBinary packet parser"]
-        DW["dns-writer.js\nBinary packet writer"]
-        DR["dns-resolver.js\nLocal zone resolution"]
-        DF["dns-forwarder.js\nUpstream forwarding"]
-        DY["dynamic-records.js\nEphemeral/persistent records"]
-        TE["EventEmitter\nTelemetry events"]
-    end
+```
 ```
 
 ---
@@ -310,19 +299,7 @@ Compares Cloudflare (1.1.1.1) vs Google (8.8.8.8) resolution latency.
 }
 ```
 
----
 
-### `POST /api/dns/inject`
-
-Sends a raw UDP query to the local custom DNS server for telemetry triggering.
-
-**Request:**
-
-```json
-{ "domain": "example.com", "type": "A" }
-```
-
----
 
 ## Project Structure
 
@@ -352,22 +329,11 @@ DNS-Observatory/
 │       ├── index.js                # Express API server entry point
 │       ├── dns-iterative.js        # Core iterative resolution engine
 │       ├── geoip-service.js        # GeoIP lookup (API + MMDB fallback)
-│       └── root-hints.js           # IANA root server list
-│
-├── custom-dns-server/              # Standalone custom DNS server workspace
-│   ├── server/dns-server.js        # UDP socket server
-│   ├── lib/
-│   │   ├── dns-parser.js           # Binary DNS packet parser
-│   │   ├── dns-writer.js           # Binary DNS packet writer
-│   │   ├── dns-resolver.js         # Local zone resolution
-│   │   ├── dns-forwarder.js        # Upstream query forwarding
-│   │   ├── dynamic-records.js      # Ephemeral/persistent record management
-│   │   └── record-manager.js       # Record loading and caching
-│   ├── api/http-api.js             # REST API for DNS management
-│   ├── config/
-│   │   ├── dns-config.js           # Forwarding and upstream config
-│   │   └── dns-records.json        # Static DNS zone records
-│   └── __tests__/                  # Jest test suite
+│       ├── root-hints.js           # IANA root server list
+│       └── lib/                    # Binary packet parsing and writing libraries
+│           ├── types.js            # DNS header flags and record types
+│           ├── dns-parser.js       # Binary DNS response parser
+│           └── dns-writer.js       # Binary DNS query builder
 │
 ├── bruno-collection/               # Bruno API collection
 ├── Dockerfile                      # Multi-stage Docker build
@@ -380,7 +346,6 @@ DNS-Observatory/
 ## Known Limitations
 
 - **Free-tier hosting**: The backend runs on Render's free tier, which spins down after inactivity. The first request after idle may take 30–60 seconds for cold start.
-- **UDP port restrictions**: Most cloud platforms (including Render) do not expose UDP ports, so the custom DNS server (`port 5354`) is only reachable in local/Docker environments. The deployed version queries public DNS servers directly.
 - **No recursive caching**: The iterative resolver intentionally bypasses caching to demonstrate the full resolution path every time.
 - **GeoIP accuracy**: The free ip-api.com tier is rate-limited to 45 requests/minute. High-traffic usage may fall back to the a lil bit less precise local MaxMind databases.(city level accuracy may not be visible sometimes with locak MaxMind DB)
 

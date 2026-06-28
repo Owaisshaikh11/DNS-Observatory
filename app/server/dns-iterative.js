@@ -24,7 +24,7 @@ const net = require('net');
 const logger = require('./logger');
 const { buildDnsQuery } = require('./dns-query-writer');
 const { parseDnsResponse } = require('./dns-response-parser');
-const { parseQuery } = require('../../custom-dns-server/lib/dns-parser');
+const { parseQuery } = require('./lib/dns-parser');
 const { lookupGeoIp } = require('./geoip-service');
 const ROOT_SERVERS = require('./root-hints');
 

@@ -11,9 +11,9 @@ module.exports = [
       'app/server/data/geoip/**'
     ]
   },
-  // Node backend files (app server & custom-dns-server)
+  // Node backend files (app server)
   {
-    files: ['app/server/**/*.js', 'custom-dns-server/**/*.js'],
+    files: ['app/server/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',

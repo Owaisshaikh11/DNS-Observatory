@@ -1,2 +1,3 @@
-const { buildDnsQuery } = require('../../custom-dns-server/lib/dns-writer');
+const { buildDnsQuery } = require('./lib/dns-writer');
 module.exports = { buildDnsQuery };
+

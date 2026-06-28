@@ -275,7 +275,7 @@ function parseRdata(buffer, offset, type, length) {
     }
 
     default:
-      return `<${length} bytes of type ${type}>`;
+      return `<length} bytes of type ${type}>`;
   }
 }
 
@@ -615,11 +615,11 @@ function createResponse(query, answers = [], rcode = 0) {
       answersWritten++;
     } catch (err) {
       if (err instanceof RangeError || err.message.includes("out of range") || err.message.includes("overflow")) {
-        offset = prevOffset;
-        tcFlag = true;
-        break;
+         offset = prevOffset;
+         tcFlag = true;
+         break;
       } else {
-        throw err;
+         throw err;
       }
     }
   }
