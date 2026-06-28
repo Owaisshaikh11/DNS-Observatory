@@ -682,7 +682,7 @@ export default function VisualizerPage() {
               className={`flex items-center gap-1.5 px-3 py-0.5 border font-bold hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-150 cursor-pointer ${
                 isCacheOpen
                   ? 'bg-accent border-accent text-base font-black shadow-[2px_2px_0_0_#0D0D0D]'
-                  : 'border-ink bg-base text-ink'
+                  : 'border-ink/20 hover:border-ink hover:text-accent bg-base text-ink'
               }`}
             >
               <Database className="w-3.5 h-3.5" />

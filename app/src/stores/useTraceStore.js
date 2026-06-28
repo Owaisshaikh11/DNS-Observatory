@@ -20,6 +20,16 @@ try {
   console.error("Failed to parse recent queries:", e);
 }
 
+let initialBypassCache = true;
+try {
+  const stored = localStorage.getItem('dns_bypass_cache');
+  if (stored !== null) {
+    initialBypassCache = stored === 'true';
+  }
+} catch (e) {
+  console.error("Failed to load dns_bypass_cache setting:", e);
+}
+
 export const useTraceStore = create((set, get) => ({
   domain: '',
   recordType: 'ALL',
@@ -36,7 +46,7 @@ export const useTraceStore = create((set, get) => ({
   resolver: '1.1.1.1 (Cloudflare)',
   activeAbortController: null,
   recentQueries: initialRecentQueries,
-  bypassCache: true,
+  bypassCache: initialBypassCache,
 
   setDomain: (domain) => set({ domain }),
   setRecordType: (recordType) => set({ recordType }),
@@ -44,7 +54,14 @@ export const useTraceStore = create((set, get) => ({
   setBenchmarkData: (benchmarkData) => set({ benchmarkData }),
   setIsBenchmarking: (isBenchmarking) => set({ isBenchmarking }),
   setResolver: (resolver) => set({ resolver }),
-  setBypassCache: (bypassCache) => set({ bypassCache }),
+  setBypassCache: (bypassCache) => {
+    set({ bypassCache });
+    try {
+      localStorage.setItem('dns_bypass_cache', String(bypassCache));
+    } catch (e) {
+      console.error("Failed to save dns_bypass_cache setting:", e);
+    }
+  },
 
   cancelPendingRequests: () => {
     const controller = get().activeAbortController;
