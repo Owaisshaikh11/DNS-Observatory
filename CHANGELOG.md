@@ -2,6 +2,64 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.0.0](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v1.0.1...v2.0.0) (2026-06-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* Deactivated local custom DNS server on port 5354,
+removed /api/dns/inject, and deleted local zone records.
+
+* feat(resolver): implement virtual caching engine and cache drawer UI
+
+- Remove the 3-second UDP socket loopback lookup on port 5354
+from `dns-iterative.js`.
+- Repurpose the local resolution step as a `Recursive Resolver` hop
+pointing to the selected public resolver.
+- Create an in-memory `DnsCache` module with normalized key matching,
+TTL-based eviction, and negative caching for NXDOMAIN errors.
+- Integrate cache check, hit, and save flows into the Express `/api/dns/trace` route,
+returning a mock 2-hop trace on cache hits.
+- Add cache management API routes (`GET /api/dns/cache`,
+`DELETE /api/dns/cache`, `POST /api/dns/cache/clear`).
+- Add `bypassCache` state and update `startTrace` payload
+in the Zustand store.
+- Create sliding `CacheDrawer` component featuring a cache mode toggle,
+ticking timers, shrinking progress bars, and record evictions.
+- Add RESOLVER CACHE header button, a pulsing Coach-Mark tooltip,
+and custom cache-hit log lines in `VisualizerPage.jsx`.
+- Adapt `CompactTree.jsx` to render green edges and center 2-hop graphs
+at a scale of 1.0 on cache hits
+
+* feat(ui): persist caching settings and polish cache drawer layout
+
+- Persist the `bypassCache` user setting in `localStorage` under
+`dns_bypass_cache` to resolve cache-checking bypass on refresh.
+- Adjust the `RESOLVER CACHE` top-bar button closed style to have
+light margins (`border-ink/20`) consistent with other header buttons.
+- Convert the full-height cache panel to an inset floating card layout
+with 12px margins on all sides (`top-[52px] bottom-3 right-3`).
+- Add an slidable segmented toggle switch ("Bypass Cache" / "Active Cache").
+- Add an inline search input box to dynamically filter
+cached DNS records by domain name or record type.
+- Add individual collapsible record card states with chevrons,
+smooth height transitions, and bulk `[+] EXPAND ALL` / `[-] COLLAPSE ALL` controls.
+- Replace the empty state icon with a database icon and a status badge.
+
+* fix(resolver): resolve recursive payload inspector issues and correct response flags
+
+- Generate authentic DNS query/response packets for the LOCAL recursive
+resolver hop on cache misses and cache hits, fixing the
+"Packet payload missing" error.
+- Remove hardcoded authoritative answer flag (AA) from the recursive
+resolver's response in dns-parser.js to ensure compliant headers (0x8180).
+- Prevent the recursive resolver node from showing
+final answers and timing details early in Resolution
+Lab playback by introducing isCompleted prop logic.
+- Implement dynamic cache TTL decay and a 500-entry LRU cache eviction limit.
+
+* Refactor DNS server, implement caching engine, and enhance UI (#3) ([d80c538](https://github.com/Owaisshaikh11/DNS-Observatory/commit/d80c538dad1a182b6ccc64005c44c18b0e9cb40c)), closes [#3](https://github.com/Owaisshaikh11/DNS-Observatory/issues/3)
+
 ## [1.0.1](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v1.0.0...v1.0.1) (2026-06-24)
 
 
