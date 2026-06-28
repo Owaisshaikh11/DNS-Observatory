@@ -275,7 +275,7 @@ function parseRdata(buffer, offset, type, length) {
     }
 
     default:
-      return `<${length} bytes of type ${type}>`;
+      return `${length} bytes of type ${type}`;
   }
 }
 
@@ -577,7 +577,7 @@ function createResponse(query, answers = [], rcode = 0) {
   let offset = 12;
 
   buffer.writeUInt16BE(query.header.id, 0);
-  let flags = QR_MASK | AA_MASK | (query.header.flags & RD_MASK) | RA_MASK;
+  let flags = QR_MASK | (query.header.flags & RD_MASK) | RA_MASK;
   if (rcode !== 0) {
     flags = (flags & ~0x000f) | (rcode & 0x0f);
   }
@@ -615,11 +615,11 @@ function createResponse(query, answers = [], rcode = 0) {
       answersWritten++;
     } catch (err) {
       if (err instanceof RangeError || err.message.includes("out of range") || err.message.includes("overflow")) {
-        offset = prevOffset;
-        tcFlag = true;
-        break;
+         offset = prevOffset;
+         tcFlag = true;
+         break;
       } else {
-        throw err;
+         throw err;
       }
     }
   }

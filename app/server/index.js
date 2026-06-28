@@ -1,20 +1,11 @@
 /**
  * index.js — Visualizer Backend
  *
- * Single Node.js process that runs:
- *   1. The custom DNS UDP server on port 5354
- *   2. The Express API server on port 4000
- *
- * Running both in the same process lets the telemetry bridge subscribe
- * directly to the DNS server's EventEmitter and stream events to the
- * frontend over WebSocket — no IPC or polling needed.
+ * Single Node.js process that runs the Express API server on port 4000.
  *
  * API routes:
  *   POST /api/dns/trace      — full iterative trace for a domain/type
  *   POST /api/dns/benchmark  — Cloudflare vs Google latency comparison
- *
- * WebSocket events emitted to clients:
- *   dns:query                — every query that passes through the local DNS server
  */
 
 const path = require('path');
@@ -25,15 +16,11 @@ const pinoHttp = require('pino-http');
 const logger = require('./logger');
 
 const { iterativeTrace, benchmarkResolvers } = require('./dns-iterative');
-
-// Pull in the custom DNS server from the sibling directory
-const { startDnsUdpServer } = require('../../custom-dns-server/server/dns-server');
-const { loadRecords } = require('../../custom-dns-server/lib/record-manager');
-const { loadDynamicSubdomains, cleanupExpiredSubdomains } = require('../../custom-dns-server/lib/dynamic-records');
+const dnsCache = require('./lib/dns-cache');
+const { buildDnsQuery } = require('./lib/dns-writer');
+const { parseQuery, parseDnsResponse, createResponse } = require('./lib/dns-parser');
 
 const API_PORT = process.env.API_PORT || 4000;
-const DNS_PORT = process.env.DNS_PORT || 5354;
-const DNS_RECORDS_PATH = path.resolve(__dirname, '../../custom-dns-server/config/dns-records.json');
 
 // Allow the Vite dev server and any localhost origin during development
 const CORS_ORIGINS = [
@@ -90,15 +77,38 @@ function apiRateLimiter(req, res, next) {
   next();
 }
 
+function maskIpAddress(ip) {
+  if (!ip) return '127.0.0.xx';
+  // If it's a standard loopback address, don't mask it or just return it as is
+  if (ip === '::1' || ip === '127.0.0.1' || ip === '::ffff:127.0.0.1') {
+    return '127.0.0.1';
+  }
+
+  // IPv4-mapped IPv6 address (e.g. ::ffff:192.0.2.128)
+  let cleanIp = ip;
+  if (ip.startsWith('::ffff:')) {
+    cleanIp = ip.substring(7);
+  }
+
+  if (cleanIp.includes('.')) {
+    // IPv4
+    const parts = cleanIp.split('.');
+    if (parts.length === 4) {
+      return `${parts[0]}.${parts[1]}.${parts[2]}.xx`;
+    }
+  } else if (cleanIp.includes(':')) {
+    // IPv6
+    const parts = cleanIp.split(':');
+    if (parts.length > 1) {
+      parts[parts.length - 1] = 'xx';
+      return parts.join(':');
+    }
+  }
+  return cleanIp;
+}
+
 async function start() {
-  // ── 1. Start the custom DNS server ─────────────────────────────────────────
-  loadRecords(DNS_RECORDS_PATH);
-  loadDynamicSubdomains();
-
-  const dnsServer = startDnsUdpServer(DNS_PORT);
-  setInterval(cleanupExpiredSubdomains, 60_000);
-
-  // ── 2. Set up Express ──────────────────────────────────────────────────────
+  // ── Set up Express ─────────────────────────────────────────────────────────
   const app = express();
   const httpServer = http.createServer(app);
 
@@ -120,7 +130,7 @@ async function start() {
    */
   app.post('/api/dns/trace', async (req, res) => {
     try {
-      const { domain, type = 'A', resolver } = req.body || {};
+      const { domain, type = 'A', resolver, bypassCache } = req.body || {};
 
       if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
         return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
@@ -148,14 +158,227 @@ async function start() {
         }
       }
 
+      const bypass = bypassCache !== false; // defaults to true
+      const rawClientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+      const rawIp = typeof rawClientIp === 'string' && rawClientIp.includes(',')
+        ? rawClientIp.split(',')[0].trim()
+        : rawClientIp;
+      const maskedClientIp = maskIpAddress(rawIp);
+
+      if (!bypass) {
+        const cached = dnsCache.get(cleanDomain, cleanType);
+        if (cached) {
+          req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Cache HIT for trace query ${cleanDomain} (${cleanType})`);
+
+          const TYPE_NUMBERS = {
+            A: 1,
+            NS: 2,
+            CNAME: 5,
+            SOA: 6,
+            PTR: 12,
+            MX: 15,
+            TXT: 16,
+            AAAA: 28,
+            SRV: 33,
+          };
+          const typeNum = TYPE_NUMBERS[cleanType] || 1;
+
+          const queryBuffer = buildDnsQuery(cleanDomain, typeNum, { recursionDesired: true });
+          const queryHex = [...queryBuffer].map(b => b.toString(16).padStart(2, '0')).join(' ');
+          const queryPacket = parseQuery(queryBuffer);
+          queryPacket.rawHex = queryHex;
+
+          const mappedAnswers = (cached.answers || []).map(ans => ({
+            type: ans.typeNum,
+            class: ans.class,
+            ttl: ans.ttl,
+            data: ans.value,
+          }));
+
+          const responseBuffer = createResponse(queryPacket, mappedAnswers, cached.status === 'NXDOMAIN' ? 3 : 0);
+          const responseParsed = parseDnsResponse(responseBuffer);
+
+          const clientHop = {
+            id: 'client-0',
+            step: 0,
+            type: 'CLIENT',
+            label: 'Stub Resolver',
+            server: null,
+            ip: maskedClientIp,
+            port: null,
+            latencyMs: 0,
+            cumulativeMs: 0,
+            parsed: null,
+            geo: { flag: '💻', org: 'Local Machine', country: 'Local', city: null, countryCode: null },
+            queryDomain: cleanDomain,
+            description: `Initiating trace for cached domain ${cleanDomain} (Cache Hit).`,
+            queriedTypes: [cleanType],
+            parallelQueries: null,
+          };
+
+          const localHop = {
+            id: 'local-0',
+            step: 1,
+            type: 'LOCAL',
+            label: 'Recursive Resolver (Cache Hit)',
+            server: 'dns-resolver',
+            ip: cleanResolver,
+            port: 53,
+            latencyMs: 0,
+            cumulativeMs: 0,
+            queryPacket: {
+              id: queryPacket.id,
+              flags: queryPacket.flags,
+              rawFlags: queryPacket.rawFlags,
+              opcode: queryPacket.opcode,
+              rcode: queryPacket.rcode,
+              qdcount: queryPacket.qdcount,
+              questions: queryPacket.questions,
+              rawHex: queryPacket.rawHex,
+            },
+            response: {
+              id: responseParsed.id,
+              flags: responseParsed.flags,
+              rawFlags: responseParsed.rawFlags,
+              opcode: responseParsed.opcode,
+              opcodeNum: responseParsed.opcodeNum,
+              rcode: responseParsed.rcode,
+              rcodeNum: responseParsed.rcodeNum,
+              qdcount: responseParsed.qdcount,
+              ancount: responseParsed.ancount,
+              nscount: responseParsed.nscount,
+              arcount: responseParsed.arcount,
+              questions: responseParsed.questions,
+              answers: responseParsed.answers,
+              authority: responseParsed.authority,
+              additional: responseParsed.additional,
+              dnssec: responseParsed.dnssec,
+              dnssecPresent: responseParsed.dnssecPresent,
+              rawHex: responseParsed.rawHex,
+              byteLength: responseBuffer.length,
+            },
+            geo: { flag: '⚡', org: 'Recursive Resolver (Cached)', country: 'Cached', city: null, countryCode: null },
+            queryDomain: cleanDomain,
+            description: cached.status === 'NXDOMAIN'
+              ? `Resolved instantly from Virtual Cache: Target domain does not exist (Negative Caching NXDOMAIN).`
+              : `Resolved instantly from Virtual Cache. No external queries were made.`,
+            byteLength: responseBuffer.length,
+            queriedTypes: [cleanType],
+            parallelQueries: [{
+              type: cleanType,
+              latencyMs: 0,
+              byteLength: responseBuffer.length,
+              rcode: cached.status,
+              queryPacket: {
+                id: queryPacket.id,
+                flags: queryPacket.flags,
+                rawFlags: queryPacket.rawFlags,
+                questions: queryPacket.questions,
+                rawHex: queryPacket.rawHex,
+              },
+              responsePacket: {
+                id: responseParsed.id,
+                flags: responseParsed.flags,
+                rawFlags: responseParsed.rawFlags,
+                rcode: responseParsed.rcode,
+                answers: responseParsed.answers,
+                questions: responseParsed.questions,
+                authority: responseParsed.authority,
+                additional: responseParsed.additional,
+                dnssec: responseParsed.dnssec,
+                dnssecPresent: responseParsed.dnssecPresent,
+                rawHex: responseParsed.rawHex,
+              },
+              resolvedOverTcp: false,
+              failureReason: null,
+              attempts: [],
+            }],
+          };
+
+          const traceResult = {
+            domain: cleanDomain,
+            recordType: cleanType,
+            status: cached.status,
+            totalLatency: 0,
+            dnssecPresent: cached.answers.some(ans => ans.typeName === 'RRSIG' || ans.typeName === 'DS' || ans.typeName === 'DNSKEY'),
+            answers: cached.answers,
+            cnameChain: [],
+            authZone: null,
+            authNs: null,
+            hopCount: 2,
+            hops: [clientHop, localHop],
+            edges: [
+              { from: 'client-0', to: 'local-0', label: 'Cache Hit (0ms)' }
+            ],
+            timestamp: Date.now(),
+            isCacheHit: true
+          };
+
+          return res.json(traceResult);
+        }
+      }
+
       req.log.info({ domain: cleanDomain, recordType: cleanType, resolver: cleanResolver }, `Initiating trace for ${cleanDomain} (${cleanType}) using resolver ${cleanResolver}`);
 
-      const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver);
+      const trace = await iterativeTrace(cleanDomain, cleanType, cleanResolver, maskedClientIp);
+
+      // Cache successful response OR negative cache NXDOMAIN response
+      if (trace.status === 'NOERROR' && trace.answers && trace.answers.length > 0) {
+        dnsCache.set(cleanDomain, cleanType, trace.answers, 'NOERROR');
+      } else if (trace.status === 'NXDOMAIN') {
+        dnsCache.set(cleanDomain, cleanType, [], 'NXDOMAIN');
+      }
+
       res.json(trace);
     } catch (err) {
       const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
       const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
       req.log.error({ err, domain: domainVal, recordType: typeVal }, `Error executing trace for ${domainVal}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/dns/cache
+   * Returns active cached entries.
+   */
+  app.get('/api/dns/cache', (req, res) => {
+    try {
+      res.json(dnsCache.getAllActive());
+    } catch (err) {
+      logger.error({ err }, 'Error retrieving active cache');
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * DELETE /api/dns/cache
+   * Evicts a single record.
+   */
+  app.delete('/api/dns/cache', (req, res) => {
+    try {
+      const { domain, type } = req.body || {};
+      if (!domain || !type) {
+        return res.status(400).json({ error: 'domain and type are required' });
+      }
+      const success = dnsCache.delete(domain, type);
+      res.json({ success });
+    } catch (err) {
+      logger.error({ err }, 'Error deleting cache entry');
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/dns/cache/clear
+   * Flushes the entire cache.
+   */
+  app.post('/api/dns/cache/clear', (req, res) => {
+    try {
+      dnsCache.clear();
+      res.json({ success: true });
+    } catch (err) {
+      logger.error({ err }, 'Error clearing cache');
       res.status(500).json({ error: err.message });
     }
   });
@@ -199,49 +422,7 @@ async function start() {
     }
   });
 
-  /**
-   * POST /api/dns/inject
-   * Body: { domain: string, type: string }
-   *
-   * Sends a raw UDP query to localhost:5354 to trigger telemetry collection.
-   */
-  app.post('/api/dns/inject', async (req, res) => {
-    try {
-      const { domain, type = 'A' } = req.body || {};
 
-      if (!domain || typeof domain !== 'string' || domain.trim().length === 0) {
-        return res.status(400).json({ error: 'domain is required and must be a non-empty string' });
-      }
-
-      const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
-      const allowedTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'PTR', 'SRV'];
-      const cleanType = String(type).toUpperCase().trim();
-      if (!allowedTypes.includes(cleanType)) {
-        return res.status(400).json({ error: `Invalid type "${type}". Allowed: ${allowedTypes.join(', ')}` });
-      }
-
-      const { buildDnsQuery } = require('./dns-query-writer');
-      const dgram = require('dgram');
-      const TYPE_NUMBERS = { A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, SRV: 33 };
-      const typeNum = TYPE_NUMBERS[cleanType] || 1;
-
-      const queryBuffer = buildDnsQuery(cleanDomain, typeNum, { recursionDesired: true });
-      const client = dgram.createSocket('udp4');
-      client.send(queryBuffer, 5354, '127.0.0.1', (err) => {
-        client.close();
-        if (err) {
-          req.log.error({ err, domain: cleanDomain, recordType: cleanType }, 'Failed to inject mock query');
-          return res.status(500).json({ error: `Failed to inject query: ${err.message}` });
-        }
-        res.json({ success: true, message: `Injected UDP query to port 5354 for ${cleanDomain} (${cleanType})` });
-      });
-    } catch (err) {
-      const domainVal = req.body && typeof req.body.domain === 'string' ? req.body.domain.trim() : 'unknown';
-      const typeVal = req.body && req.body.type ? String(req.body.type) : 'A';
-      req.log.error({ err, domain: domainVal, recordType: typeVal }, 'Injection build failed');
-      res.status(500).json({ error: err.message });
-    }
-  });
 
   // ── API Catch-All (failsafe JSON 404 for unmatched /api/* routes) ──────────
   app.all('/api/{*splat}', (req, res) => {
@@ -260,15 +441,13 @@ async function start() {
   // ── Start listening ────────────────────────────────────────────────────────
   httpServer.listen(API_PORT, () => {
     logger.info(`Visualizer backend running at http://localhost:${API_PORT}`);
-    logger.info(`Custom DNS server running on UDP port ${DNS_PORT}`);
   });
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   process.on('SIGINT', () => {
-    logger.info('Closing servers...');
-    dnsServer.close();
+    logger.info('Closing server...');
     httpServer.close(() => {
-      logger.info('Servers closed. Goodbye!');
+      logger.info('Server closed. Goodbye!');
       process.exit(0);
     });
   });

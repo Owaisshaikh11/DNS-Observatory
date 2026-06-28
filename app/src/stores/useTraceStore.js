@@ -20,6 +20,16 @@ try {
   console.error("Failed to parse recent queries:", e);
 }
 
+let initialBypassCache = true;
+try {
+  const stored = localStorage.getItem('dns_bypass_cache');
+  if (stored !== null) {
+    initialBypassCache = stored === 'true';
+  }
+} catch (e) {
+  console.error("Failed to load dns_bypass_cache setting:", e);
+}
+
 export const useTraceStore = create((set, get) => ({
   domain: '',
   recordType: 'ALL',
@@ -33,9 +43,11 @@ export const useTraceStore = create((set, get) => ({
   isSlowMo: false,
   realTtl: 0,
   selectedHop: null,
+  completedAt: null,
   resolver: '1.1.1.1 (Cloudflare)',
   activeAbortController: null,
   recentQueries: initialRecentQueries,
+  bypassCache: initialBypassCache,
 
   setDomain: (domain) => set({ domain }),
   setRecordType: (recordType) => set({ recordType }),
@@ -43,6 +55,14 @@ export const useTraceStore = create((set, get) => ({
   setBenchmarkData: (benchmarkData) => set({ benchmarkData }),
   setIsBenchmarking: (isBenchmarking) => set({ isBenchmarking }),
   setResolver: (resolver) => set({ resolver }),
+  setBypassCache: (bypassCache) => {
+    set({ bypassCache });
+    try {
+      localStorage.setItem('dns_bypass_cache', String(bypassCache));
+    } catch (e) {
+      console.error("Failed to save dns_bypass_cache setting:", e);
+    }
+  },
 
   cancelPendingRequests: () => {
     const controller = get().activeAbortController;
@@ -75,6 +95,7 @@ export const useTraceStore = create((set, get) => ({
       selectedHop: null,
       benchmarkData: null,
       isBenchmarking: isBenchmarkMode,
+      completedAt: null,
     })
 
     let benchmarkPromise = Promise.resolve(null);
@@ -105,7 +126,7 @@ export const useTraceStore = create((set, get) => ({
       const response = await fetch('/api/dns/trace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain, type, resolver: resolverIp }),
+        body: JSON.stringify({ domain, type, resolver: resolverIp, bypassCache: get().bypassCache }),
         signal,
       })
 
@@ -145,7 +166,7 @@ export const useTraceStore = create((set, get) => ({
   setActiveStep: (step) => set({ activeStep: step }),
   setSelectedHop: (hopId) => set({ selectedHop: hopId }),
   toggleSlowMo: () => set((state) => ({ isSlowMo: !state.isSlowMo })),
-  replayTrace: () => set({ activeStep: 0, playbackState: 'PLAYING', selectedHop: null }),
+  replayTrace: () => set({ activeStep: 0, playbackState: 'PLAYING', selectedHop: null, completedAt: null }),
   clearRecentQueries: () => {
     set({ recentQueries: [] });
     try {

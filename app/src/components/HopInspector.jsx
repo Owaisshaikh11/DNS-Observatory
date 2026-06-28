@@ -28,7 +28,7 @@ const renderIsp = (org) => {
   return org;
 };
 
-export default function HopInspector({ hop, secondsElapsed = 0 }) {
+export default function HopInspector({ hop, secondsElapsed = 0, isCompleted = true }) {
   const [showHex, setShowHex] = useState(false);
   const [tcpTip, setTcpTip] = useState(false);
 
@@ -47,7 +47,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
   }
 
   const isClient = hop.type === 'CLIENT';
-  const showDnssec = hop.response?.dnssec && (
+  const showDnssec = hop.response?.dnssec && isCompleted && (
     hop.response.dnssec.rrsigPresent ||
     hop.response.dnssec.dnskeyPresent ||
     hop.response.dnssec.dsPresent
@@ -61,14 +61,18 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
           <span className="font-display font-black text-xs uppercase text-ink tracking-tight">
             Hop {hop.step} // {hop.label}
           </span>
-          {hop.response?.rcode && (
+          {hop.response?.rcode && isCompleted ? (
             <span
               className={`font-mono text-[8.5px] font-bold px-1.5 py-px border border-current select-none ${hop.response.rcode === 'NOERROR' ? 'text-success' : 'text-error'
                 }`}
             >
               {hop.response.rcode}
             </span>
-          )}
+          ) : hop.response?.rcode ? (
+            <span className="font-mono text-[8.5px] px-1.5 py-px border border-dashed select-none opacity-45">
+              PENDING
+            </span>
+          ) : null}
         </div>
         <div className="font-mono text-[8px] mt-1 leading-normal select-text text-ink/75">
           <span className="opacity-50">SERVER:</span> {hop.type === 'CNAME_REDIRECT' ? 'None (Virtual Redirect)' : (hop.server || 'None')} · <span className="opacity-50">IP:</span> {hop.type === 'CNAME_REDIRECT' ? 'None' : (
@@ -76,8 +80,8 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
               <span>{hop.ip}</span>
               <CopyButton text={hop.ip} />
             </span>
-          )} · <span className="opacity-50">RTT:</span> {hop.latencyMs}ms
-          {hop.resolvedOverTcp && (
+          )} · <span className="opacity-50">RTT:</span> {isCompleted ? `${hop.latencyMs}ms` : '--'}
+          {hop.resolvedOverTcp && isCompleted && (
             <span 
               className="interactive relative inline-block ml-1.5 align-middle select-none"
               onMouseEnter={() => setTcpTip(true)}
@@ -216,7 +220,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       )}
 
       {/* Parallel Queries Timing Breakdown */}
-      {hop.parallelQueries && hop.parallelQueries.length > 1 && (
+      {hop.parallelQueries && hop.parallelQueries.length > 1 && isCompleted && (
         <div className="border border-ink/20 p-2.5 bg-base/40 flex flex-col gap-2 flex-none">
           <div className="font-mono text-[8px] text-ink/40 uppercase tracking-widest font-bold select-none">
             ;; Parallel Queries Timing Breakdown
@@ -246,7 +250,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       )}
 
       {/* Answers Section */}
-      {hop.response?.answers && hop.response.answers.length > 0 && (
+      {hop.response?.answers && hop.response.answers.length > 0 && isCompleted && (
         <div className="flex flex-col gap-1.5">
           <div className="font-mono text-[8px] text-ink/35 uppercase tracking-wider select-none">
             ;; Answer Section ({hop.response.answers.length})
@@ -260,7 +264,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       )}
 
       {/* Authority Section */}
-      {hop.response?.authority && hop.response.authority.length > 0 && (
+      {hop.response?.authority && hop.response.authority.length > 0 && isCompleted && (
         <div className="flex flex-col gap-1.5">
           <div className="font-mono text-[8px] text-ink/35 uppercase tracking-wider select-none">
             ;; Authority Section ({hop.response.authority.length})
@@ -274,7 +278,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       )}
 
       {/* Additional Section */}
-      {hop.response?.additional && hop.response.additional.length > 0 && (
+      {hop.response?.additional && hop.response.additional.length > 0 && isCompleted && (
         <div className="flex flex-col gap-1.5">
           <div className="font-mono text-[8px] text-ink/35 uppercase tracking-wider select-none">
             ;; Additional Section ({hop.response.additional.length})
@@ -288,7 +292,7 @@ export default function HopInspector({ hop, secondsElapsed = 0 }) {
       )}
 
       {/* Exporter and Hex Viewer Buttons */}
-      {!isClient && hop.type !== 'CNAME_REDIRECT' && (
+      {!isClient && hop.type !== 'CNAME_REDIRECT' && isCompleted && (
         <div className="mt-1 flex flex-col gap-2 flex-none font-mono">
           <button
             onClick={() => {

@@ -24,7 +24,7 @@ const net = require('net');
 const logger = require('./logger');
 const { buildDnsQuery } = require('./dns-query-writer');
 const { parseDnsResponse } = require('./dns-response-parser');
-const { parseQuery } = require('../../custom-dns-server/lib/dns-parser');
+const { parseQuery, createResponse } = require('./lib/dns-parser');
 const { lookupGeoIp } = require('./geoip-service');
 const ROOT_SERVERS = require('./root-hints');
 
@@ -451,7 +451,7 @@ function buildHop({ id, step, type, label, server, ip, port, latencyMs, cumulati
  * @param {string} recordType - Record type string (e.g. "A", "MX", "ALL")
  * @returns {Promise<TraceResult>}
  */
-async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') {
+async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', clientIp = '127.0.0.1') {
   const hops = [];
   const edges = [];
   let cumulative = 0;
@@ -479,14 +479,14 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
     const clientHopId = `client-${clientCount++}`;
     const localHopId = `local-${localCount++}`;
 
-    // 1. CLIENT Hop
+    // 1. Stub Resolver Hop
     hops.push(buildHop({
       id: clientHopId,
       step: hops.length,
       type: 'CLIENT',
-      label: isFirst ? 'Client Stub' : `Client Stub (${depth})`,
+      label: isFirst ? 'Stub Resolver' : `Stub Resolver (${depth})`,
       server: null,
-      ip: '127.0.0.1',
+      ip: clientIp,
       port: null,
       latencyMs: 0,
       cumulativeMs: cumulative,
@@ -494,7 +494,7 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
       geo: { flag: '💻', org: 'Local Machine', country: 'Local', city: null, countryCode: null },
       queryDomain: currentDomain,
       description: isFirst
-        ? `Initiating iterative trace for ${currentDomain} [TYPE: ${recordType.toUpperCase()}]. Querying local custom DNS server first.`
+        ? `Initiating iterative trace for ${currentDomain} [TYPE: ${recordType.toUpperCase()}]. Querying configured Recursive Resolver (${resolverIp}).`
         : `CNAME target resolution: initiating query for ${currentDomain} [TYPE: ${recordType.toUpperCase()}].`,
       queriedTypes: [recordType.toUpperCase()],
       parallelQueries: null,
@@ -508,203 +508,33 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
       });
     }
 
-    // 2. LOCAL Hop
-    let isLocalHit = false;
-    let localParsed = null;
-    let localLatency;
-    let localByteLength = 0;
-    let localParallelQueries = [];
-
-    try {
-      const { parsed, latencyMs, byteLength, queryPacket, resolvedOverTcp, failureReason, attempts } = await performHop('127.0.0.1', 5354, currentDomain, typeNum, {
-        recursionDesired: true,
-        dnssecOk: false,
-      });
-      localParsed = parsed;
-      localLatency = latencyMs;
-      localByteLength = byteLength;
-      cumulative += latencyMs;
-
-      isLocalHit = parsed.isAuthoritative && parsed.answers.length > 0;
-
-      if (isLocalHit && recordType.toUpperCase() === 'ALL') {
-        localParallelQueries.push({
-          type: 'A',
-          latencyMs: latencyMs,
-          byteLength: byteLength,
-          rcode: parsed.rcode,
-          queryPacket,
-          responsePacket: parsed,
-          resolvedOverTcp,
-          failureReason,
-          attempts,
-        });
-
-        const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
-        const extraResults = await Promise.allSettled(
-          extraTypes.map(t => performHop('127.0.0.1', 5354, currentDomain, TYPE_NUMBERS[t], { recursionDesired: true, dnssecOk: false }))
-        );
-
-        extraTypes.forEach((t, idx) => {
-          const res = extraResults[idx];
-          if (res.status === 'fulfilled') {
-            const val = res.value;
-            localParsed.answers.push(...val.parsed.answers);
-            localByteLength += val.byteLength;
-            localParallelQueries.push({
-              type: t,
-              latencyMs: val.latencyMs,
-              byteLength: val.byteLength,
-              rcode: val.parsed.rcode,
-              queryPacket: val.queryPacket,
-              responsePacket: val.parsed,
-              resolvedOverTcp: val.resolvedOverTcp,
-              failureReason: val.failureReason,
-              attempts: val.attempts,
-            });
-          } else {
-            localParallelQueries.push({
-              type: t,
-              latencyMs: 0,
-              byteLength: 0,
-              rcode: 'TIMEOUT',
-              error: res.reason.message,
-              queryPacket: null,
-              responsePacket: null,
-              resolvedOverTcp: false,
-              failureReason: `Query timed out or failed: ${res.reason.message}`,
-              attempts: null,
-            });
-          }
-        });
-
-        const latencies = localParallelQueries.map(q => q.latencyMs);
-        localLatency = Math.max(...latencies);
-        cumulative = cumulative - latencyMs + localLatency;
-      } else {
-        localParallelQueries = [{
-          type: recordType.toUpperCase(),
-          latencyMs: localLatency,
-          byteLength: localByteLength,
-          rcode: localParsed ? localParsed.rcode : 'UNKNOWN',
-          queryPacket,
-          responsePacket: localParsed,
-          resolvedOverTcp,
-          failureReason,
-          attempts,
-        }];
-      }
-
-      const localDescription = isLocalHit
-        ? `Local DNS server found an authoritative answer for ${currentDomain}. Returning cached/configured record — no iterative resolution needed.`
-        : `Local DNS server has no authoritative record for ${currentDomain}. Starting iterative resolution from a root server.`;
-
-      hops.push(buildHop({
-        id: localHopId,
-        step: hops.length,
-        type: 'LOCAL',
-        label: isFirst ? 'Custom DNS' : `Custom DNS (${depth})`,
-        server: 'localhost',
-        ip: '127.0.0.1',
-        port: 5354,
-        latencyMs: localLatency,
-        cumulativeMs: cumulative,
-        parsed,
-        geo: { flag: '🖥️', org: 'Local DNS Server', country: 'Local', city: null, countryCode: null },
-        queryDomain: currentDomain,
-        description: localDescription,
-        byteLength: localByteLength,
-        queriedTypes: isLocalHit && recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
-        parallelQueries: localParallelQueries,
-        queryPacket,
-        resolvedOverTcp,
-        failureReason,
-        attempts,
-      }));
-      edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
-
-    } catch (err) {
-      hops.push(buildHop({
-        id: localHopId,
-        step: hops.length,
-        type: 'LOCAL',
-        label: isFirst ? 'Custom DNS' : `Custom DNS (${depth})`,
-        server: 'localhost',
-        ip: '127.0.0.1',
-        port: 5354,
-        latencyMs: 0,
-        cumulativeMs: cumulative,
-        parsed: null,
-        geo: { flag: '🖥️', org: 'Local DNS Server', country: 'Local', city: null, countryCode: null },
-        queryDomain: currentDomain,
-        description: `Local DNS server unreachable (${err.message}). Proceeding with public iterative resolution.`,
-      }));
-      edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
-    }
-
-    if (isLocalHit && localParsed) {
-      const authHopId = `auth-${authCount++}`;
-      edges.push({ from: localHopId, to: authHopId, label: 'Local authoritative answer' });
-
-      hops.push(buildHop({
-        id: authHopId,
-        step: hops.length,
-        type: 'AUTH',
-        label: isFirst ? 'Authoritative' : `Authoritative (${depth})`,
-        server: 'local-zone',
-        ip: '127.0.0.1:5354',
-        port: 5354,
-        latencyMs: 0,
-        cumulativeMs: cumulative,
-        parsed: localParsed,
-        geo: { flag: '🔐', org: 'Local Auth Zone' },
-        queryDomain: currentDomain,
-        description: `Local custom DNS served authoritative mapping directly.`,
-        byteLength: localByteLength,
-        queriedTypes: recordType.toUpperCase() === 'ALL' ? ['A', 'AAAA', 'MX', 'TXT', 'NS'] : [recordType.toUpperCase()],
-        parallelQueries: localParallelQueries,
-      }));
-
-      finalParsed = localParsed;
-
-      const cnameRec = localParsed.answers.find(r => r.typeName === 'CNAME' && r.name.replace(/\.$/, '').toLowerCase() === currentDomain);
-      if (cnameRec) {
-        const cnameTarget = String(cnameRec.value).replace(/\.$/, '').toLowerCase();
-        cnameChain.push({ from: currentDomain, to: cnameTarget });
-
-        const hasTargetIp = localParsed.answers.some(r => r.name.replace(/\.$/, '').toLowerCase() === cnameTarget && (r.typeName === 'A' || r.typeName === 'AAAA'));
-        if (!hasTargetIp) {
-          const cnameNodeId = `cname-${cnameCount++}`;
-          hops.push({
-            id: cnameNodeId,
-            step: hops.length,
-            type: 'CNAME_REDIRECT',
-            label: 'CNAME Redirect',
-            server: null,
-            ip: null,
-            port: null,
-            latencyMs: 0,
-            cumulativeMs: cumulative,
-            description: `CNAME alias detected: ${currentDomain} points to ${cnameTarget}. Following redirection.`,
-            geo: { flag: '🔗', org: 'CNAME Alias' },
-            queryDomain: currentDomain,
-            cnameFrom: currentDomain,
-            cnameTo: cnameTarget,
-            response: null,
-            queriedTypes: [recordType.toUpperCase()],
-            parallelQueries: null,
-          });
-          edges.push({ from: authHopId, to: cnameNodeId, label: 'CNAME Alias' });
-
-          currentDomain = cnameTarget;
-          depth++;
-          continue;
-        }
-      }
-      break;
-    }
+    // 2. Recursive Resolver Hop (Virtual Cache Check)
+    hops.push(buildHop({
+      id: localHopId,
+      step: hops.length,
+      type: 'LOCAL',
+      label: isFirst ? 'Recursive Resolver' : `Recursive Resolver (${depth})`,
+      server: 'dns-resolver',
+      ip: resolverIp,
+      port: 53,
+      latencyMs: 0,
+      cumulativeMs: cumulative,
+      parsed: null,
+      geo: { flag: '🖥️', org: 'Recursive Resolver', country: 'Resolver Gateway', city: null, countryCode: null },
+      queryDomain: currentDomain,
+      description: `Stub resolver queried the Recursive Resolver (${resolverIp}) for ${currentDomain}. No active cached record found. Initiating public iterative lookup.`,
+      byteLength: 0,
+      queriedTypes: [recordType.toUpperCase()],
+      parallelQueries: [],
+      queryPacket: null,
+      resolvedOverTcp: false,
+      failureReason: null,
+      attempts: [],
+    }));
+    edges.push({ from: clientHopId, to: localHopId, label: `Query ${currentDomain} ${recordType.toUpperCase()}` });
 
     // 3. Iterative Tracing Start
+    let iterativeLatency = 0;
     const rootServer = ROOT_SERVERS[Math.floor(Math.random() * ROOT_SERVERS.length)];
     let currentQueryServerIp = rootServer.ipv4;
     let currentQueryServerName = rootServer.name;
@@ -813,7 +643,9 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
           attempts,
         }];
 
-        if (recordType.toUpperCase() === 'ALL' && !isNXDomain) {
+        const isCnameResponse = parsed.answers && parsed.answers.some(r => r.typeName === 'CNAME');
+
+        if (recordType.toUpperCase() === 'ALL' && !isNXDomain && !isCnameResponse) {
           const extraTypes = ['AAAA', 'MX', 'TXT', 'NS'];
           const extraResults = await Promise.allSettled(
             extraTypes.map(t => performHop(currentQueryServerIp, 53, currentDomain, TYPE_NUMBERS[t], { dnssecOk: false }))
@@ -861,6 +693,8 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
         let description;
         if (isNXDomain) {
           description = `Server ${currentQueryServerName} (${currentQueryServerIp}) returned NXDOMAIN. Domain does not exist.`;
+        } else if (parsed.rcode !== 'NOERROR') {
+          description = `Server ${currentQueryServerName} (${currentQueryServerIp}) returned error response: ${parsed.rcode}.`;
         } else if (parsed.answers && parsed.answers.length > 0) {
           const first = parsed.answers[0];
           const valStr = typeof first.value === 'string' ? first.value : JSON.stringify(first.value);
@@ -980,6 +814,51 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1') 
         previousNodeId = currentNodeId;
         nextReferralLabel = `NS ${refZoneLabel.startsWith('.') ? refZoneLabel : '.' + refZoneLabel} → ${ref.nsName}`;
         iterativeHopCount++;
+      }
+
+      iterativeLatency += latencyMs;
+    }
+
+    const localHopIndex = hops.findIndex(h => h.id === localHopId);
+    if (localHopIndex !== -1 && finalParsed) {
+      try {
+        const queryBuffer = buildDnsQuery(hops[localHopIndex].queryDomain, typeNum, { recursionDesired: true });
+        const queryHex = [...queryBuffer].map(b => b.toString(16).padStart(2, '0')).join(' ');
+        const queryPacket = parseQuery(queryBuffer);
+        queryPacket.rawHex = queryHex;
+
+        const mappedAnswers = (finalParsed.answers || []).map(ans => ({
+          type: ans.typeNum,
+          class: ans.class,
+          ttl: ans.ttl,
+          data: ans.value,
+        }));
+
+        const responseBuffer = createResponse(queryPacket, mappedAnswers, finalParsed.rcodeNum || 0);
+        const responseParsed = parseDnsResponse(responseBuffer);
+
+        hops[localHopIndex].latencyMs = iterativeLatency;
+        hops[localHopIndex].queryPacket = queryPacket;
+        hops[localHopIndex].response = {
+          id: responseParsed.id,
+          rawFlags: responseParsed.rawFlags,
+          flags: responseParsed.flags,
+          qdcount: responseParsed.qdcount,
+          ancount: responseParsed.ancount,
+          nscount: responseParsed.nscount,
+          arcount: responseParsed.arcount,
+          questions: responseParsed.questions,
+          rcode: responseParsed.rcode,
+          answers: responseParsed.answers,
+          authority: responseParsed.authority,
+          additional: responseParsed.additional,
+          dnssec: responseParsed.dnssec,
+          rawHex: responseParsed.rawHex,
+          byteLength: responseBuffer.length,
+        };
+        hops[localHopIndex].byteLength = responseBuffer.length;
+      } catch (err) {
+        logger.error(`[Iterative] Failed to serialize authentic query/response for LOCAL resolver hop: ${err.message}`);
       }
     }
   }

@@ -7,15 +7,14 @@
   "type": "commonjs",
   "main": "index.js",
   "workspaces": [
-    "app",
-    "custom-dns-server"
+    "app"
   ],
   "scripts": {
     "dev": "concurrently --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"node app/server/index.js\" \"npm run dev --prefix app\"",
     "start:server": "node app/server/index.js",
     "start:app": "npm run dev --prefix app",
-    "start:dns": "node custom-dns-server/index.js",
     "build": "npm run build --workspace app",
+    "lint": "eslint .",
     "commit": "cz",
     "release": "commit-and-tag-version",
     "release:first": "commit-and-tag-version --first-release",
@@ -49,9 +48,6 @@
       "eslint --fix"
     ],
     "app/server/**/*.js": [
-      "eslint --fix"
-    ],
-    "custom-dns-server/**/*.js": [
       "eslint --fix"
     ]
   }
