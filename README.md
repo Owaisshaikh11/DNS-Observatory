@@ -16,7 +16,7 @@
 </p> 
 
 <p align="center">
-  <a href="https://dns-observatory-app.vercel.app/">
+  <a href="https://dns-observatory.vercel.app/">
     <img src="https://img.shields.io/badge/%E2%9A%A1_SEE_IT_IN_ACTION-FF4D00?style=for-the-badge" alt="See it in action" />
   </a>
 </p>
