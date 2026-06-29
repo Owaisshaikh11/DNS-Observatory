@@ -4,16 +4,22 @@ All notable changes to this project will be documented in this file. See [commit
 
 ## [2.1.0](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v2.0.0...v2.1.0) (2026-06-29)
 
-
 ### Features
-
 * **resolver cache:** hide cache flush and eviction buttons in production ([b07f19c](https://github.com/Owaisshaikh11/DNS-Observatory/commit/b07f19ccad57150f63c01475ce25750f1ff9aeb6))
-* **visualizer:** improve resolution graph layout and parallel query paths for batched query ([9d3eaa9](https://github.com/Owaisshaikh11/DNS-Observatory/commit/9d3eaa925d9f2aeacdf91e3b82551f6e4168ccf7)), closes [#2563](https://github.com/Owaisshaikh11/DNS-Observatory/issues/2563)
-
-
+* **visualizer:** improve resolution graph layout and parallel query paths for batched query ([9d3eaa9](https://github.com/Owaisshaikh11/DNS-Observatory/commit/9d3eaa925d9f2aeacdf91e3b82551f6e4168ccf7))
+  - Implement a 5-parallel-line rendering logic for batch authoritative hops with staggered animated flow dots.
+  - Expand segment spacing dimensions (`segWidth` to 1400px) to prevent card overlaps between CNAME redirects and Stub Resolvers.
 ### Bug Fixes
-
 * **ui:** fix hop numbering and toast styles, add icons for resolvers(google,cloudflare) ([b23f66a](https://github.com/Owaisshaikh11/DNS-Observatory/commit/b23f66a8da6dcb1797a3f4bd5090dd872cf4d731))
+  - Standardize sidebar waterfall badges to show sequential 1-based index numbers.
+  - Redesign Cache Ready pop-up using translucent card styles, backdrop blur, and custom drop shadows.
+  - Rename the "ALL" record type selection to "BATCH ALL" styled in bold gray.
+  - Render official brand SVG logos (Cloudflare and Google) next to recursive resolver nodes.
+  - Dynamically offset text query labels based on line counts to prevent text rendering below lines.
+### Refactoring & Improvements
+* **visualizer:** overhaul graph layout, arrow routing, and legends ([a7a5a97](https://github.com/Owaisshaikh11/DNS-Observatory/commit/a7a5a976f920257bb57e844a0349479b4a4cb886))
+  - Re-route query and response coordinate lines to prevent overlapping path issues.
+  - Standardize authoritative card layouts to display clear zones and nameserver hostnames.
 
 ## [2.0.0](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v1.0.1...v2.0.0) (2026-06-28)
 
