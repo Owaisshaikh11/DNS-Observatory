@@ -7,6 +7,7 @@ import { formatRecordValue } from '../utils/dnsFormatter';
 export default function CacheDrawer({ isOpen, onClose }) {
   const { bypassCache, setBypassCache } = useTraceStore();
   const [entries, setEntries] = useState([]);
+  const isProduction = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedKeys, setCollapsedKeys] = useState({});
@@ -280,12 +281,14 @@ export default function CacheDrawer({ isOpen, onClose }) {
         </div>
 
         {/* Flush Button */}
-        <button
-          onClick={handleFlushCache}
-          className="w-full py-2 border border-ink bg-ink text-base font-mono text-[9px] font-black uppercase tracking-widest hover:bg-accent hover:border-accent transition-colors duration-150 cursor-pointer shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-[2px] active:shadow-none"
-        >
-          Flush Cache Database
-        </button>
+        {!isProduction && (
+          <button
+            onClick={handleFlushCache}
+            className="w-full py-2 border border-ink bg-ink text-base font-mono text-[9px] font-black uppercase tracking-widest hover:bg-accent hover:border-accent transition-colors duration-150 cursor-pointer shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-[2px] active:shadow-none"
+          >
+            Flush Cache Database
+          </button>
+        )}
       </div>
 
       {/* Search & Bulk Expand Row */}
@@ -382,16 +385,18 @@ export default function CacheDrawer({ isOpen, onClose }) {
                       </div>
                     </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEvictEntry(entry.domain, entry.type);
-                      }}
-                      className="p-1 border border-transparent hover:border-ink hover:text-red-500 hover:bg-red-50 transition-all duration-100 cursor-pointer text-ink/40 ml-2"
-                      title="Evict Record"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isProduction && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEvictEntry(entry.domain, entry.type);
+                        }}
+                        className="p-1 border border-transparent hover:border-ink hover:text-red-500 hover:bg-red-50 transition-all duration-100 cursor-pointer text-ink/40 ml-2"
+                        title="Evict Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Card Body - Animated Collapsible content */}
