@@ -1,13 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import CountryFlag from './CountryFlag';
 
-const NW = 130;
-const NH = 44;
-
-const getCenter = (node) => ({
-  x: node.treeX + NW / 2,
-  y: node.treeY + NH / 2,
-});
+const NW = 220;
+const NH = 64;
 
 const cleanOrg = (org) => {
   if (!org) return '';
@@ -17,47 +12,60 @@ const cleanOrg = (org) => {
     .trim();
 };
 
-const simplifyLabel = (label) => {
-  if (!label) return '';
-  if (label.includes('Cache Hit')) {
-    return 'Cache Hit';
+const getResolverIcon = (ip, className = "w-3.5 h-3.5") => {
+  const cleanIp = (ip || '').toString().trim();
+  if (cleanIp === '1.1.1.1' || cleanIp === '1.0.0.1' || cleanIp.includes('cloudflare')) {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="#F38020" title="Cloudflare Resolver">
+        <path d="M22.9 14.8c-.2-1.7-1.4-3.1-3.1-3.5.1-.4.1-.7.1-1.1 0-3-2.5-5.5-5.5-5.5-2.2 0-4.1 1.3-4.9 3.2C8.7 7.4 7.6 7 6.4 7 3.4 7 1 9.4 1 12.4c0 .4 0 .8.1 1.2C.4 14 0 14.9 0 15.8 0 17.6 1.4 19 3.2 19h18c1.5 0 2.8-1.2 2.8-2.7 0-.7-.3-1.2-.8-1.5z" />
+      </svg>
+    );
   }
-  if (label.startsWith('Query ')) {
-    const parts = label.split(' ');
-    const type = parts[parts.length - 1] || 'ALL';
-    return `Query (${type})`;
+  if (cleanIp === '8.8.8.8' || cleanIp === '8.8.4.4' || cleanIp.includes('google')) {
+    return (
+      <svg viewBox="0 0 24 24" className={className} title="Google Resolver">
+        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+      </svg>
+    );
   }
-  if (label.includes('Local authoritative answer')) {
-    return 'Auth Answer';
-  }
-  if (label.includes('Iterative')) {
-    return 'Iterative';
-  }
-  if (label.startsWith('NS ')) {
-    const match = label.match(/NS\s+([^\s→]+)/);
-    if (match) {
-      return `NS (${match[1]})`;
-    }
-    return 'NS Referral';
-  }
-  return label;
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" title="Recursive Resolver">
+      <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+      <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+      <line x1="6" y1="6" x2="6.01" y2="6" strokeLinecap="round" />
+      <line x1="6" y1="18" x2="6.01" y2="18" strokeLinecap="round" />
+      <line x1="20" y1="6" x2="16" y2="6" strokeLinecap="round" />
+      <line x1="20" y1="18" x2="16" y2="18" strokeLinecap="round" />
+    </svg>
+  );
 };
 
-const getLatencyColor = (latencyMs) => {
-  if (latencyMs === undefined || latencyMs === null) return 'var(--color-accent)';
-  if (latencyMs < 40) return '#22C55E'; // green
-  if (latencyMs <= 150) return '#FF4D00'; // orange
-  return '#EF4444'; // red
+const formatLabelLines = (label) => {
+  if (!label) return [];
+  const parts = label.split(' — ');
+  if (parts.length < 2) return [label];
+
+  const title = parts[0];
+  const details = parts[1];
+
+  // If details contains parentheses, split it
+  if (details.includes('(')) {
+    const parenIdx = details.indexOf('(');
+    const mainDetail = details.substring(0, parenIdx).trim();
+    const subDetail = details.substring(parenIdx).trim();
+    return [title, mainDetail, subDetail];
+  }
+
+  return [title, details];
 };
 
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit }) {
+export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit, recordType }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
-  const columns = hops?.length || 1;
-  const W = Math.max(850, columns * 240);
-  const H = 280;
-  const paddingX = 30;
 
-  // Dynamic layout calculations
+  // Dynamic layout calculations: split hops into CNAME-based segments
   const segments = useMemo(() => {
     const segs = [];
     let currentSegment = [];
@@ -76,42 +84,85 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     return segs;
   }, [hops]);
 
+  const segWidth = 1400;
+  const gap = 180;
+  const W = Math.max(1600, segments.length * (segWidth + gap));
+  const H = 500;
+  const paddingX = 30;
+  const columns = segments.length * 2.5;
+
   const nodes = useMemo(() => {
-    return hops?.map((hop, index) => {
-      let treeX = paddingX;
-      if (columns > 1) {
-        treeX = paddingX + (index * (W - 2 * paddingX - NW)) / (columns - 1);
+    const calculatedNodes = [];
+
+    for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+      const seg = segments[sIdx];
+      const segmentStartX = sIdx * (segWidth + gap) + paddingX;
+
+      const clientHop = seg.find(h => h.type === 'CLIENT');
+      const localHop = seg.find(h => h.type === 'LOCAL');
+      const cnameHop = seg.find(h => h.type === 'CNAME_REDIRECT');
+      const nsHops = seg.filter(h => h.type === 'ROOT' || h.type === 'TLD' || h.type === 'AUTH');
+
+      // Lay out CLIENT (Stub Resolver)
+      if (clientHop) {
+        calculatedNodes.push({
+          ...clientHop,
+          treeX: segmentStartX,
+          treeY: 218,
+          isPlaceholder: false
+        });
       }
 
-      let treeY = 118; // default center (perfectly symmetric vertically)
-      if (hop.type === 'ROOT') {
-        treeY = 30;
-      } else if (hop.type === 'TLD') {
-        treeY = 206;
-      } else if (hop.type === 'AUTH') {
-        const segment = segments.find(seg => seg.some(h => h.id === hop.id)) || [];
-        const authHopsInSegment = segment.filter(h => h.type === 'AUTH');
-        const authIndex = authHopsInSegment.findIndex(h => h.id === hop.id);
-
-        if (authHopsInSegment.length === 1) {
-          treeY = 118;
-        } else if (authHopsInSegment.length > 1) {
-          const startY = 175;
-          const endY = 118;
-          treeY = startY + (authIndex * (endY - startY)) / (authHopsInSegment.length - 1);
-        }
+      // Lay out LOCAL (Recursive Resolver - Caching Resolver)
+      if (localHop) {
+        calculatedNodes.push({
+          ...localHop,
+          treeX: segmentStartX + 420,
+          treeY: 218,
+          isPlaceholder: false
+        });
       }
 
-      return {
-        ...hop,
-        treeX,
-        treeY,
-        isPlaceholder: false,
-      };
-    }) || [];
-  }, [hops, columns, W, segments]);
+      // Lay out nameservers (skip Root, TLD, Auth if it is a cache hit)
+      if (!isCacheHit) {
+        nsHops.forEach((hop, idx) => {
+          let treeY = 218;
+          if (nsHops.length === 1) {
+            treeY = 218;
+          } else if (nsHops.length === 2) {
+            treeY = idx === 0 ? 148 : 288;
+          } else if (nsHops.length === 3) {
+            treeY = idx === 0 ? 78 : idx === 1 ? 218 : 358;
+          } else if (nsHops.length > 3) {
+            const startY = 30;
+            const endY = 406;
+            treeY = startY + (idx * (endY - startY)) / (nsHops.length - 1);
+          }
 
-  const edgesToRender = edges || [];
+          calculatedNodes.push({
+            ...hop,
+            treeX: segmentStartX + 860, // Stacked on the right
+            treeY,
+            isPlaceholder: false
+          });
+        });
+      }
+
+      // Lay out CNAME_REDIRECT (redirection node at segment end)
+      if (cnameHop) {
+        calculatedNodes.push({
+          ...cnameHop,
+          treeX: segmentStartX + 1180,
+          treeY: 218,
+          isPlaceholder: false
+        });
+      }
+    }
+
+    return calculatedNodes;
+  }, [segments, isCacheHit]);
+
+  const edgesToRender = useMemo(() => edges || [], [edges]);
 
   // Zoom & Pan states
   const containerRef = useRef(null);
@@ -120,7 +171,6 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [activeTooltip, setActiveTooltip] = useState(null); // { edge, toNode, x, y }
-  const [hoveredParallelEdge, setHoveredParallelEdge] = useState(null); // edgeKey on hover
 
   const defaultScale = columns > 5 ? Math.max(0.4, 5 / columns) : 1;
 
@@ -179,7 +229,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     });
   };
 
-  // Initialize: Center whole canvas on columns change
+  // Initialize: Center canvas on segments change
   useEffect(() => {
     const timer = setTimeout(() => {
       centerCanvas(defaultScale);
@@ -187,39 +237,28 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     return () => clearTimeout(timer);
   }, [columns, defaultScale, centerCanvas]);
 
-  // Camera follow effect for active steps during playback
+  // Camera follow effect: focus on node receiving the active step packet (prioritize explicitly selectedHop)
   useEffect(() => {
-    if (hops && hops[activeStep]) {
-      const id = hops[activeStep].id;
-      const timer = setTimeout(() => {
-        if (isCacheHit) {
-          centerCanvas(1.0);
-        } else {
-          focusNode(id, 1.25);
-        }
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [activeStep, hops, focusNode, isCacheHit, centerCanvas]);
+    const activeEdge = edgesToRender.find(e => e.step === activeStep);
+    const targetNodeId = selectedHop || activeEdge?.to || (hops && hops[0]?.id);
 
-  // Camera follow effect when selectedHop changes
-  useEffect(() => {
-    if (selectedHop) {
+    if (targetNodeId) {
       const timer = setTimeout(() => {
         if (isCacheHit) {
           centerCanvas(1.0);
         } else {
-          focusNode(selectedHop, 1.25);
+          focusNode(targetNodeId, 1.25);
         }
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [selectedHop, focusNode, isCacheHit, centerCanvas]);
+  }, [activeStep, edgesToRender, selectedHop, hops, focusNode, isCacheHit, centerCanvas]);
 
   // Keep focus node centered during window resizes
   useEffect(() => {
     const handleResize = () => {
-      const targetId = selectedHop || (hops && hops[activeStep]?.id);
+      const activeEdge = edgesToRender.find(e => e.step === activeStep);
+      const targetId = selectedHop || activeEdge?.to || (hops && hops[0]?.id);
       if (isCacheHit) {
         centerCanvas(1.0);
       } else if (targetId) {
@@ -230,7 +269,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [selectedHop, activeStep, scale, hops, focusNode, centerCanvas, isCacheHit]);
+  }, [selectedHop, activeStep, edgesToRender, scale, hops, focusNode, centerCanvas, isCacheHit]);
 
   const handleWheel = (e) => {
     e.preventDefault();
@@ -254,6 +293,190 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
 
   const handleMouseUp = () => {
     setIsDragging(false);
+  };
+
+  // Helper for computing orthogonal arrow coordinates and corners
+  // Helper for computing parallel path coordinates when type is ALL
+  const getParallelPathD = (fromNode, toNode, edgeType, dy) => {
+    const localNode = fromNode.type === 'LOCAL' ? fromNode : toNode;
+    const nsNode = fromNode.type === 'LOCAL' ? toNode : fromNode;
+    const isQuery = edgeType === 'query';
+    const x1_q = localNode.treeX + 60;
+    const y1_q = localNode.treeY + NH;
+    const x2_q = nsNode.treeX;
+    const y2_q = nsNode.treeY + 20;
+
+    const x1_r = nsNode.treeX;
+    const y1_r = nsNode.treeY + 44;
+    const x2_r = localNode.treeX + 160;
+    const y2_r = localNode.treeY + NH;
+
+    if (isQuery) {
+      return `M ${x1_q} ${y1_q} L ${x1_q} ${y2_q + dy} L ${x2_q} ${y2_q + dy}`;
+    } else {
+      return `M ${x1_r} ${y1_r + dy} L ${x2_r} ${y1_r + dy} L ${x2_r} ${y2_r}`;
+    }
+  };
+
+  const getEdgeCoords = (fromNode, toNode, edgeType) => {
+    let x1, y1, x2, y2;
+
+    const isClientHop = (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') || 
+                        (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT');
+    
+    const isCnameHop = fromNode.type === 'CNAME_REDIRECT' || toNode.type === 'CNAME_REDIRECT';
+
+    if (isClientHop) {
+      if (fromNode.type === 'CLIENT') {
+        // Query (Stub -> Recursive)
+        x1 = fromNode.treeX + NW;
+        y1 = fromNode.treeY + 20;
+        x2 = toNode.treeX;
+        y2 = toNode.treeY + 20;
+      } else {
+        // Response (Recursive -> Stub)
+        x1 = fromNode.treeX;
+        y1 = fromNode.treeY + 44;
+        x2 = toNode.treeX + NW;
+        y2 = toNode.treeY + 44;
+      }
+      return { x1, y1, x2, y2, pathD: `M ${x1} ${y1} L ${x2} ${y2}`, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
+    }
+
+    if (isCnameHop) {
+      if (fromNode.treeX + NW <= toNode.treeX) {
+        x1 = fromNode.treeX + NW;
+        y1 = fromNode.treeY + NH / 2;
+        x2 = toNode.treeX;
+        y2 = toNode.treeY + NH / 2;
+      } else {
+        x1 = fromNode.treeX;
+        y1 = fromNode.treeY + NH / 2;
+        x2 = toNode.treeX + NW;
+        y2 = toNode.treeY + NH / 2;
+      }
+      return { x1, y1, x2, y2, pathD: `M ${x1} ${y1} L ${x2} ${y2}`, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
+    }
+
+    // Nameserver Hops (Recursive <-> Nameserver)
+    const localNode = fromNode.type === 'LOCAL' ? fromNode : toNode;
+    const nsNode = fromNode.type === 'LOCAL' ? toNode : fromNode;
+    const isQuery = edgeType === 'query';
+
+    const nsY = nsNode.treeY;
+    
+    let pathD;
+    let midX, midY;
+
+    if (nsY < 200) {
+      // Top-edge routing (above Recursive)
+      if (isQuery) {
+        x1 = localNode.treeX + 60;
+        y1 = localNode.treeY;
+        x2 = nsNode.treeX;
+        y2 = nsNode.treeY + 20;
+        pathD = `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y2;
+      } else {
+        x1 = nsNode.treeX;
+        y1 = nsNode.treeY + 44;
+        x2 = localNode.treeX + 160;
+        y2 = localNode.treeY;
+        pathD = `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y1;
+      }
+    } else if (nsY > 230) {
+      // Bottom-edge routing (below Recursive)
+      if (isQuery) {
+        x1 = localNode.treeX + 60;
+        y1 = localNode.treeY + NH;
+        x2 = nsNode.treeX;
+        y2 = nsNode.treeY + 20;
+        pathD = `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y2;
+      } else {
+        x1 = nsNode.treeX;
+        y1 = nsNode.treeY + 44;
+        x2 = localNode.treeX + 160;
+        y2 = localNode.treeY + NH;
+        pathD = `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y1;
+      }
+    } else {
+      // Right-edge routing (horizontally aligned)
+      if (isQuery) {
+        x1 = localNode.treeX + NW;
+        y1 = localNode.treeY + 20;
+        x2 = nsNode.treeX;
+        y2 = nsNode.treeY + 20;
+      } else {
+        x1 = nsNode.treeX;
+        y1 = nsNode.treeY + 44;
+        x2 = localNode.treeX + NW;
+        y2 = localNode.treeY + 44;
+      }
+      pathD = `M ${x1} ${y1} L ${x2} ${y2}`;
+      midX = (x1 + x2) / 2;
+      midY = (y1 + y2) / 2;
+    }
+
+    return { x1, y1, x2, y2, pathD, midX, midY };
+  };
+
+  // Helper for clean text label positioning
+  const getLabelCoords = (fromNode, toNode, edgeType) => {
+    const isClientHop = (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') || 
+                        (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT');
+    
+    if (isClientHop) {
+      if (fromNode.type === 'CLIENT') {
+        const midX = (fromNode.treeX + NW + toNode.treeX) / 2;
+        return {
+          x: midX,
+          y: fromNode.treeY + 20 - 6,
+          textAnchor: 'middle'
+        };
+      } else {
+        const midX = (fromNode.treeX + toNode.treeX + NW) / 2;
+        return {
+          x: midX,
+          y: fromNode.treeY + 44 + 11,
+          textAnchor: 'middle'
+        };
+      }
+    }
+
+    const isCnameHop = fromNode.type === 'CNAME_REDIRECT' || toNode.type === 'CNAME_REDIRECT';
+    if (isCnameHop) {
+      return {
+        x: (fromNode.treeX + toNode.treeX + NW) / 2,
+        y: (fromNode.treeY + toNode.treeY) / 2 - 10,
+        textAnchor: 'middle'
+      };
+    }
+
+    // Nameserver hops (Recursive <-> Nameserver)
+    const nsNode = fromNode.type === 'LOCAL' ? toNode : fromNode;
+    const isQuery = edgeType === 'query';
+
+    // We align all text to the left side of the nameserver cards (end anchor)
+    if (isQuery) {
+      return {
+        x: nsNode.treeX - 30,
+        y: nsNode.treeY + 20 - 5,
+        textAnchor: 'end'
+      };
+    } else {
+      return {
+        x: nsNode.treeX - 30,
+        y: nsNode.treeY + 44 + 11,
+        textAnchor: 'end'
+      };
+    }
   };
 
   return (
@@ -285,8 +508,20 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
         >
           <defs>
             <pattern id="treeGrid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(13,13,13,0.03)" strokeWidth="0.5" />
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(13,13,13,0.06)" strokeWidth="0.5" />
             </pattern>
+            <marker id="arrow-query" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563EB" />
+            </marker>
+            <marker id="arrow-referral" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-accent)" />
+            </marker>
+            <marker id="arrow-answer" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#22C55E" />
+            </marker>
+            <marker id="arrow-inactive" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="rgba(13,13,13,0.15)" />
+            </marker>
           </defs>
           <rect width={W} height={H} fill="url(#treeGrid)" />
 
@@ -296,120 +531,96 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
             const toNode = nodes.find((n) => n.id === edge.to);
             if (!fromNode || !toNode) return null;
 
-            const fromHop = hops?.find((h) => h.id === edge.from);
-            const toHop = hops?.find((h) => h.id === edge.to);
+            const isActive = edge.step <= activeStep;
+            if (!isActive) return null; // Reveal query arrows and details only when they are animated/active
 
-            let isActive = false;
-            let isAnimating = false;
+            const isAnimating = edge.step === activeStep && playbackState === 'PLAYING';
 
-            if (fromHop && toHop) {
-              const toIndex = hops.findIndex((h) => h.id === toHop.id);
-              isActive = toIndex <= activeStep;
-              isAnimating = toIndex === activeStep && playbackState === 'PLAYING';
-            } else {
-              const fromIndex = hops.findIndex((h) => h.id === fromHop.id);
-              isActive = fromIndex !== -1 && fromIndex <= activeStep;
-              isAnimating = fromIndex === activeStep && playbackState === 'PLAYING';
+            const { pathD, midX, midY } = getEdgeCoords(fromNode, toNode, edge.type);
+
+            let strokeColor = 'rgba(13,13,13,0.1)';
+            let isDashed = true;
+
+            if (isActive) {
+              if (edge.type === 'query') {
+                strokeColor = '#2563EB';
+                isDashed = false;
+              } else if (edge.type === 'referral') {
+                strokeColor = 'var(--color-accent)';
+                isDashed = true;
+              } else if (edge.type === 'answer') {
+                strokeColor = '#22C55E';
+                isDashed = false;
+              }
             }
 
-            const fc = getCenter(fromNode);
-            const tc = getCenter(toNode);
-
-            const midX = (fc.x + tc.x) / 2;
-            const midY = (fc.y + tc.y) / 2;
-
-            // Horizontal Bezier curve (S-Curve) calculation
-            const cp1x = fc.x + (tc.x - fc.x) / 2;
-            const cp1y = fc.y;
-            const cp2x = fc.x + (tc.x - fc.x) / 2;
-            const cp2y = tc.y;
-            const pathD = `M ${fc.x} ${fc.y} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${tc.y}`;
-
-            const cpX = midX;
-            const cpY = fc.y === tc.y ? fc.y + 1 : (fc.y + tc.y) / 2 + 3;
-
-            const isFinalFailedEdge = isFailedTrace && toNode.id === (hops[hops.length - 1]?.id);
-            let strokeColor = isActive
-              ? isFinalFailedEdge
-                ? '#EF4444'
-                : getLatencyColor(toNode.latencyMs)
-              : 'rgba(13,13,13,0.1)';
-
-            if (isCacheHit && isActive && toNode.type === 'LOCAL') {
-              strokeColor = '#22C55E'; // success green highlight
-            }
-            const dotColor = strokeColor;
+            const markerEnd = isActive
+              ? (edge.type === 'query' ? 'url(#arrow-query)' : edge.type === 'referral' ? 'url(#arrow-referral)' : 'url(#arrow-answer)')
+              : 'url(#arrow-inactive)';
 
             const isHovered = activeTooltip?.edge === edge;
-            const isParallelEdge = toNode.queriedTypes && toNode.queriedTypes.length > 1;
+            const labelPos = getLabelCoords(fromNode, toNode, edge.type);
 
-            if (isParallelEdge) {
-              const queryTypes = toNode.queriedTypes;
-              const N = queryTypes.length;
-              const spacing = 7;
-              const offsets = Array.from({ length: N }, (_, idx) => (idx - (N - 1) / 2) * spacing);
-              const edgeKey = `${edge.from}-${edge.to}`;
-              const isParallelHovered = hoveredParallelEdge === edgeKey;
-              const centerIdx = Math.floor(N / 2);
+            // Compute badge and text positions relative to nameserver card (nsNode) if present
+            const isClientHop = (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') || (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT');
+            const nsNode = (toNode.type === 'ROOT' || toNode.type === 'TLD' || toNode.type === 'AUTH')
+              ? toNode
+              : ((fromNode.type === 'ROOT' || fromNode.type === 'TLD' || fromNode.type === 'AUTH') ? fromNode : null);
 
+            let badgeX = labelPos.x - 35;
+            let textX = labelPos.x - 20;
+            let textAnchor = 'start';
+
+            if (isClientHop) {
+              badgeX = labelPos.x - 45;
+              textX = labelPos.x - 30;
+              textAnchor = 'start';
+            } else if (nsNode) {
+              badgeX = nsNode.treeX - 25;
+              textX = nsNode.treeX - 32;
+              textAnchor = 'end';
+            }
+
+            const lines = formatLabelLines(edge.label);
+            const textY = labelPos.y;
+            const adjustedTextY = edge.type === 'query' ? textY - (lines.length - 1) * 11 : textY;
+            const badgeY = adjustedTextY - 10;
+
+            const isParallel = recordType === 'ALL' && (fromNode.type === 'AUTH' || toNode.type === 'AUTH');
+
+            if (isParallel) {
+              const dyValues = [-6, -3, 0, 3, 6];
               return (
                 <g key={i}>
-                  {/* Inline Definitions for text paths */}
-                  <defs>
-                    {offsets.map((offset, idx) => {
-                      const startY = fc.y + offset;
-                      const endY = tc.y + offset;
-                      const cp1x = fc.x + (tc.x - fc.x) / 2;
-                      const cp1y = startY;
-                      const cp2x = fc.x + (tc.x - fc.x) / 2;
-                      const cp2y = endY;
-                      return (
-                        <path
-                          key={idx}
-                          id={`tpath-${edgeKey}-${idx}`}
-                          d={`M ${fc.x} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${endY}`}
-                        />
-                      );
-                    })}
-                  </defs>
-
-                  {/* Render the visual dashed curves */}
-                  {offsets.map((offset, idx) => {
-                    const qType = queryTypes[idx];
-                    const startY = fc.y + offset;
-                    const endY = tc.y + offset;
-                    const cp1x = fc.x + (tc.x - fc.x) / 2;
-                    const cp1y = startY;
-                    const cp2x = fc.x + (tc.x - fc.x) / 2;
-                    const cp2y = endY;
-                    const pathD = `M ${fc.x} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tc.x} ${endY}`;
-
-                    const isLineHovered = activeTooltip?.edge === edge || isParallelHovered;
+                  {dyValues.map((dy, idx) => {
+                    const pD = getParallelPathD(fromNode, toNode, edge.type, dy);
+                    const isMiddle = idx === 2;
+                    const pathMarker = isMiddle ? markerEnd : 'none';
 
                     return (
-                      <g key={qType}>
-                        {isActive && isLineHovered && (
+                      <g key={idx}>
+                        {isActive && isHovered && (
                           <path
-                            d={pathD}
+                            d={pD}
                             fill="none"
                             stroke={strokeColor}
-                            strokeWidth={4}
-                            className="opacity-15"
-                            style={{ transition: 'stroke-dasharray 0.2s' }}
+                            strokeWidth={3}
+                            className="opacity-20"
                           />
                         )}
                         <path
-                          d={pathD}
+                          d={pD}
                           fill="none"
                           stroke={strokeColor}
-                          strokeWidth={isActive ? 1.2 : 0.8}
-                          strokeDasharray={isActive ? '4 2' : '2 2'}
-                          className={isActive ? 'arrow-path' : ''}
+                          strokeWidth={isActive ? 1.0 : 0.8}
+                          strokeDasharray={isDashed ? '4 3' : 'none'}
+                          markerEnd={pathMarker}
+                          className={`${isActive ? 'arrow-path' : ''}`}
                           style={{ transition: 'stroke-width 0.2s, stroke 0.4s' }}
                         />
                         {isAnimating && (
                           <circle r="2" fill={strokeColor}>
-                            <animateMotion dur={`${1.0 + idx * 0.15}s`} repeatCount="indefinite" path={pathD} />
+                            <animateMotion dur={`${0.65 + idx * 0.15}s`} repeatCount="indefinite" path={pD} />
                             <animate attributeName="r" values="1.5;3;1.5" dur="0.8s" repeatCount="indefinite" />
                           </circle>
                         )}
@@ -417,72 +628,71 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     );
                   })}
 
-                  {/* Render the main 'N Parallel Queries' label on the center path (when not hovered) */}
-                  {!isParallelHovered && (
+                  {/* Step badge and label text (drawn once) */}
+                  <g className="select-none pointer-events-none">
+                    <rect
+                      width="13"
+                      height="13"
+                      x={badgeX}
+                      y={badgeY}
+                      fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.15)'}
+                      stroke="var(--color-ink)"
+                      strokeWidth="0.5"
+                    />
                     <text
-                      fontFamily="JetBrains Mono"
-                      fontSize="8px"
+                      x={badgeX + 6.5}
+                      y={badgeY + 9.5}
+                      textAnchor="middle"
+                      fill="var(--color-base)"
+                      fontSize="8.5px"
                       fontWeight="bold"
-                      fill={isActive ? strokeColor : 'rgba(13,13,13,0.3)'}
-                      dy="-4.5"
-                      className="select-none pointer-events-none uppercase tracking-widest transition-opacity duration-200"
+                      fontFamily="Space Grotesk"
+                    >
+                      {edge.step}
+                    </text>
+                    <text
+                      x={textX}
+                      y={adjustedTextY}
+                      textAnchor={textAnchor}
+                      fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.3)'}
+                      fontSize="9px"
+                      fontFamily="JetBrains Mono"
                       style={{
-                        textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
+                        textShadow: '1px 1px 0 var(--color-base), -1px 1px 0 var(--color-base), 1px -1px 0 var(--color-base), -1px -1px 0 var(--color-base)'
                       }}
                     >
-                      <textPath href={`#tpath-${edgeKey}-${centerIdx}`} startOffset="50%" textAnchor="middle">
-                        {`── ${N} Parallel Queries ──`}
-                      </textPath>
+                      {lines.map((line, idx) => (
+                        <tspan
+                          key={idx}
+                          x={textX}
+                          dy={idx === 0 ? 0 : 11}
+                          fontWeight={idx === 0 ? 'bold' : 'normal'}
+                          fill={idx === 0 ? undefined : 'var(--color-ink)'}
+                          opacity={idx === 2 ? 0.65 : 1}
+                        >
+                          {line}
+                        </tspan>
+                      ))}
                     </text>
-                  )}
+                  </g>
 
-                  {/* Render individual type labels on ALL paths (when hovered) */}
-                  {isParallelHovered && queryTypes.map((qType, idx) => {
-                    const subColor = isActive ? strokeColor : 'rgba(13,13,13,0.1)';
-                    const offset = offsets[idx];
-                    return (
-                      <text
-                        key={idx}
-                        x={midX}
-                        y={midY + offset}
-                        fontFamily="JetBrains Mono"
-                        fontSize="7.5px"
-                        fontWeight="black"
-                        fill={subColor}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        className="select-none pointer-events-none transition-opacity duration-200"
-                        style={{
-                          textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
-                        }}
-                      >
-                        {qType}
-                      </text>
-                    );
-                  })}
-
-                  {/* Hover detector overlay - wide transparent path for easy triggering */}
+                  {/* Interactive hover overlay path (middle path is enough for trigger) */}
                   {isActive && (
                     <path
-                      d={`M ${fc.x} ${fc.y} C ${fc.x + (tc.x - fc.x) / 2} ${fc.y}, ${fc.x + (tc.x - fc.x) / 2} ${tc.y}, ${tc.x} ${tc.y}`}
+                      d={pathD}
                       fill="none"
                       stroke="transparent"
-                      strokeWidth={30}
+                      strokeWidth={12}
                       className="cursor-pointer interactive"
                       onMouseEnter={() => {
-                        setHoveredParallelEdge(edgeKey);
-                        const slopesDown = fromNode.treeY < toNode.treeY;
-                        let tooltipY = slopesDown ? midY + 50 : midY - 150;
-                        tooltipY = Math.max(5, Math.min(tooltipY, H - 110));
                         setActiveTooltip({
                           edge,
                           toNode,
                           x: midX,
-                          y: tooltipY,
+                          y: midY - 80,
                         });
                       }}
                       onMouseLeave={() => {
-                        setHoveredParallelEdge(null);
                         setActiveTooltip(null);
                       }}
                     />
@@ -493,57 +703,89 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
 
             return (
               <g key={i}>
-                {/* Secondary thick background highlight trace on hover */}
                 {isActive && isHovered && (
                   <path
                     d={pathD}
                     fill="none"
                     stroke={strokeColor}
-                    strokeWidth={6}
+                    strokeWidth={5}
                     className="opacity-20"
                     style={{ transition: 'stroke-width 0.2s' }}
                   />
                 )}
 
-                {/* Bezier Path */}
                 <path
                   d={pathD}
                   fill="none"
                   stroke={strokeColor}
-                  strokeWidth={isActive ? (isHovered ? 2.5 : 1.5) : 1}
-                  strokeDasharray={isActive ? '5 3' : '3 3'}
+                  strokeWidth={isActive ? (isHovered ? 2.2 : 1.4) : 1}
+                  strokeDasharray={isDashed ? '4 3' : 'none'}
+                  markerEnd={markerEnd}
                   className={`${isActive ? 'arrow-path' : ''} ${isActive && isHovered ? 'arrow-path-hovered' : ''}`}
                   style={{ transition: 'stroke-width 0.2s, stroke 0.4s' }}
                 />
-                
-                {/* Edge Label */}
-                <text
-                  x={cpX}
-                  y={cpY - 6}
-                  textAnchor="middle"
-                  fill={isActive ? strokeColor : 'rgba(13,13,13,0.2)'}
-                  className="font-mono text-[10px] font-bold select-none pointer-events-none transition-all duration-200"
-                  style={{
-                    textShadow: '1.5px 1.5px 0 var(--base), -1.5px 1.5px 0 var(--base), 1.5px -1.5px 0 var(--base), -1.5px -1.5px 0 var(--base)',
-                  }}
-                >
-                  {simplifyLabel(edge.label)}
-                </text>
 
-                {/* Invisible hover overlay path for tooltips */}
+                {/* Step badge and label text */}
+                <g className="select-none pointer-events-none">
+                  <rect
+                    width="13"
+                    height="13"
+                    x={badgeX}
+                    y={badgeY}
+                    fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.15)'}
+                    stroke="var(--color-ink)"
+                    strokeWidth="0.5"
+                  />
+                  <text
+                    x={badgeX + 6.5}
+                    y={badgeY + 9.5}
+                    textAnchor="middle"
+                    fill="var(--color-base)"
+                    fontSize="8.5px"
+                    fontWeight="bold"
+                    fontFamily="Space Grotesk"
+                  >
+                    {edge.step}
+                  </text>
+                  <text
+                    x={textX}
+                    y={adjustedTextY}
+                    textAnchor={textAnchor}
+                    fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.3)'}
+                    fontSize="9px"
+                    fontFamily="JetBrains Mono"
+                    style={{
+                      textShadow: '1px 1px 0 var(--color-base), -1px 1px 0 var(--color-base), 1px -1px 0 var(--color-base), -1px -1px 0 var(--color-base)'
+                    }}
+                  >
+                    {lines.map((line, idx) => (
+                      <tspan
+                        key={idx}
+                        x={textX}
+                        dy={idx === 0 ? 0 : 11}
+                        fontWeight={idx === 0 ? 'bold' : 'normal'}
+                        fill={idx === 0 ? undefined : 'var(--color-ink)'}
+                        opacity={idx === 2 ? 0.65 : 1}
+                      >
+                        {line}
+                      </tspan>
+                    ))}
+                  </text>
+                </g>
+
                 {isActive && (
                   <path
                     d={pathD}
                     fill="none"
                     stroke="transparent"
-                    strokeWidth={8}
+                    strokeWidth={12}
                     className="cursor-pointer interactive"
                     onMouseEnter={() => {
                       setActiveTooltip({
                         edge,
                         toNode,
                         x: midX,
-                        y: midY - 85,
+                        y: midY - 80,
                       });
                     }}
                     onMouseLeave={() => {
@@ -552,11 +794,10 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                   />
                 )}
 
-                {/* Animated packet dot */}
                 {isAnimating && (
-                  <circle r="3.5" fill={dotColor}>
-                    <animateMotion dur="1.2s" repeatCount="indefinite" path={pathD} />
-                    <animate attributeName="r" values="3;5;3" dur="0.8s" repeatCount="indefinite" />
+                  <circle r="3" fill={strokeColor}>
+                    <animateMotion dur="1s" repeatCount="indefinite" path={pathD} />
+                    <animate attributeName="r" values="2.5;4;2.5" dur="0.8s" repeatCount="indefinite" />
                   </circle>
                 )}
               </g>
@@ -566,8 +807,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
           {/* Nodes */}
           {nodes.map((node) => {
             const isPlaceholder = node.isPlaceholder;
-            const hopIndex = hops?.findIndex((h) => h.id === node.id);
-            const isReached = !isPlaceholder && hopIndex !== -1 && hopIndex <= activeStep;
+            const isReached = node.type === 'CLIENT' || edgesToRender.some(edge => edge.step <= activeStep && (edge.to === node.id || edge.from === node.id));
             const isSel = selectedHop === node.id;
             const isCname = node.type === 'CNAME_REDIRECT';
 
@@ -609,13 +849,17 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     className="overflow-visible"
                   >
                     <div
-                      className={`w-full h-full border flex flex-col justify-between p-1.5 select-none transition-all duration-200 ${
+                      className={`w-full h-full border flex flex-col justify-start select-none transition-all duration-200 ${
+                        node.type === 'AUTH' ? 'gap-0.5 p-1.5' : 'gap-1.5 p-2'
+                      } ${
                         isFailedTrace && node.id === (hops[hops.length - 1]?.id)
                           ? 'bg-red-50 text-red-600 border-[#EF4444] border-2 shadow-[2px_2px_0_0_#EF4444]'
                           : isSel
                           ? isCname
                             ? 'bg-accent text-base border-accent'
                             : 'bg-ink text-base border-ink'
+                          : node.type === 'LOCAL' && isReached
+                          ? 'bg-ink text-base border-ink shadow-[2.5px_2.5px_0_0_rgba(13,13,13,0.35)]'
                           : isReached
                           ? 'bg-base/80 backdrop-blur-[2.5px] text-ink border-ink'
                           : 'bg-base/40 backdrop-blur-[1px] text-ink/30 border-ink/12'
@@ -625,37 +869,48 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                       }}
                     >
                       {/* Top line: flag + label + optional AA badge */}
-                      <div className="flex items-center gap-1 w-full min-w-0">
-                        <span className="text-[10px] shrink-0 leading-none select-none flex items-center">
+                      <div className="flex items-center gap-1.5 w-full min-w-0">
+                        <span className="text-[10px] shrink-0 leading-none select-none flex items-center justify-center">
                           {isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? '⚠️' : isReached ? (
-                            <CountryFlag countryCode={node.geo?.countryCode} fallbackFlag={node.geo?.flag} className="w-3.5 h-2.5" />
+                            node.type === 'LOCAL' ? (
+                              getResolverIcon(node.ip, "w-4 h-3.5")
+                            ) : (
+                              <CountryFlag countryCode={node.geo?.countryCode} fallbackFlag={node.geo?.flag} className="w-4 h-3" />
+                            )
                           ) : '🌐'}
                         </span>
-                        <span className={`font-display text-[9px] font-black uppercase truncate leading-none ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? 'text-ink' : 'text-ink/30'}`}>
+                        <span className={`font-display text-[10px] font-black uppercase break-words leading-tight ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-700 font-black' : isSel ? 'text-base' : isReached ? (node.type === 'LOCAL' ? 'text-white' : 'text-ink') : 'text-ink/30'}`}>
                           {node.label}
                         </span>
                         {/* Badges container */}
                         <div className="ml-auto flex items-center gap-0.5 shrink-0">
                           {isFailedTrace && node.id === (hops[hops.length - 1]?.id) && (
-                            <span className="text-[6px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none select-none">
+                            <span className="text-[7.5px] font-mono font-bold px-0.5 border border-[#EF4444] bg-[#EF4444] text-white leading-none select-none">
                               {playbackState}
                             </span>
                           )}
                           {!isCname && isReached && node.response?.flags?.includes('AA') && (
-                            <span className={`text-[6px] font-mono font-bold px-0.5 border leading-none select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
+                            <span className={`text-[7.5px] font-mono font-bold px-0.5 border leading-none select-none ${isSel ? 'bg-base text-accent border-base' : 'bg-accent text-base border-accent'}`}>
                               AA
                             </span>
                           )}
                           {isReached && node.resolvedOverTcp && (
-                            <span className={`text-[6px] font-mono font-bold px-0.5 border border-dashed leading-none select-none ${isSel ? 'border-white/50 text-white' : 'border-orange-500 text-orange-600 bg-orange-500/5'}`}>
+                            <span className={`text-[7.5px] font-mono font-bold px-0.5 border border-dashed leading-none select-none ${isSel ? 'border-white/50 text-white' : 'border-orange-500 text-orange-600 bg-orange-500/5'}`}>
                               TCP
                             </span>
                           )}
                         </div>
                       </div>
 
+                      {/* Second line (nameserver hostname) - only for AUTH hops */}
+                      {isReached && node.type === 'AUTH' && (
+                        <div className={`font-mono text-[7.5px] leading-tight break-all truncate ${isSel ? 'text-base/60' : 'text-ink/50'}`}>
+                          {node.server || 'UNKNOWN'}
+                        </div>
+                      )}
+
                       {/* Middle line: IP / Latency or target CNAME */}
-                      <div className={`font-mono text-[7px] leading-none truncate ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-500 font-bold' : isSel ? 'text-base/60' : 'text-ink/40'}`}>
+                      <div className={`font-mono text-[8px] leading-tight break-all ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-500 font-bold' : isSel ? 'text-base/60' : node.type === 'LOCAL' && isReached ? 'text-white/60' : 'text-ink/40'}`}>
                         {isFailedTrace && node.id === (hops[hops.length - 1]?.id)
                           ? `RESOLVE FAIL: ${playbackState}`
                           : isCname
@@ -666,13 +921,13 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                       </div>
 
                       {/* Bottom line: Org */}
-                      <div className={`font-mono text-[6.5px] leading-none truncate ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-400 font-medium' : isSel ? 'text-base/40' : 'text-ink/35'}`} style={{ maxWidth: NW - 12 }}>
+                      <div className={`font-mono text-[7.5px] leading-tight break-words ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-400 font-medium' : isSel ? 'text-base/40' : node.type === 'LOCAL' && isReached ? 'text-white/40' : 'text-ink/35'}`}>
                         {isFailedTrace && node.id === (hops[hops.length - 1]?.id)
                           ? `Failed at this resolver`
                           : isCname
                           ? (isReached ? `Alias of ${node.cnameFrom}` : 'Awaiting Redirection...')
                           : (isReached
-                              ? (node.geo?.org ? (cleanOrg(node.geo.org).length > 25 ? `${cleanOrg(node.geo.org).substring(0, 22)}...` : cleanOrg(node.geo.org)) : '')
+                              ? (node.geo?.org ? cleanOrg(node.geo.org) : '')
                               : 'Awaiting Connection...')
                         }
                       </div>

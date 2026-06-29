@@ -558,7 +558,7 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', 
       } else {
         type = 'AUTH';
         currentNodeId = `auth-${authCount++}`;
-        label = currentQueryServerZone;
+        label = 'AUTHORITATIVE';
       }
 
       let parsed;
@@ -859,6 +859,170 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', 
         hops[localHopIndex].byteLength = responseBuffer.length;
       } catch (err) {
         logger.error(`[Iterative] Failed to serialize authentic query/response for LOCAL resolver hop: ${err.message}`);
+      }
+    }
+  }
+
+  // ── Reconstruct Edges & Assign Steps to Hops for Hub-and-Spoke ──────────────
+  edges.length = 0; // Clear the old linear edges
+
+  const segments = [];
+  let currentSegment = [];
+  for (const hop of hops) {
+    currentSegment.push(hop);
+    if (hop.type === 'CNAME_REDIRECT') {
+      segments.push(currentSegment);
+      currentSegment = [];
+    }
+  }
+  if (currentSegment.length > 0) {
+    segments.push(currentSegment);
+  }
+
+  let stepNum = 1;
+  for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+    const seg = segments[sIdx];
+    const clientHop = seg.find(h => h.type === 'CLIENT');
+    const localHop = seg.find(h => h.type === 'LOCAL');
+    const cnameHop = seg.find(h => h.type === 'CNAME_REDIRECT');
+    const nsHops = seg.filter(h => h.type === 'ROOT' || h.type === 'TLD' || h.type === 'AUTH');
+
+    if (!clientHop || !localHop) continue;
+
+    clientHop.step = stepNum;
+    localHop.step = stepNum;
+
+    // Step 1: Query (Stub → Recursive)
+    edges.push({
+      step: stepNum++,
+      from: clientHop.id,
+      to: localHop.id,
+      label: `Query (${recordType.toUpperCase()}) — ${clientHop.queryDomain}`,
+      type: 'query'
+    });
+
+    // Steps for nameservers
+    for (const nsHop of nsHops) {
+      nsHop.step = stepNum;
+
+      // Step Query: Recursive → Nameserver
+      edges.push({
+        step: stepNum++,
+        from: localHop.id,
+        to: nsHop.id,
+        label: `Query (${(recordType.toUpperCase() === 'ALL' && nsHop.type !== 'AUTH') ? 'A' : recordType.toUpperCase()}) — ${nsHop.queryDomain}`,
+        type: 'query'
+      });
+
+      // Step Response: Nameserver → Recursive
+      const isReferral = nsHop.type === 'ROOT' || nsHop.type === 'TLD' || (nsHop.response?.authority?.some(r => r.typeName === 'NS') && !nsHop.response?.answers?.length);
+      if (isReferral) {
+        const authority = nsHop.response?.authority || [];
+        const additional = nsHop.response?.additional || [];
+        let zone = '';
+        const nsRec = authority.find(r => r.typeName === 'NS');
+        if (nsRec) {
+          zone = nsRec.name.replace(/\.$/, '');
+        }
+        if (zone && !zone.startsWith('.')) {
+          zone = '.' + zone;
+        }
+        const glueIps = additional
+          .filter(r => r.typeName === 'A' && typeof r.value === 'string')
+          .map(r => r.value);
+
+        let label = `Referral — ${zone || '.'} NS`;
+        if (glueIps.length > 0) {
+          label += ` + Glue (${glueIps.slice(0, 2).join(', ')}${glueIps.length > 2 ? ', …' : ''})`;
+        }
+
+        edges.push({
+          step: stepNum++,
+          from: nsHop.id,
+          to: localHop.id,
+          label,
+          type: 'referral'
+        });
+      } else {
+        const answers = nsHop.response?.answers || [];
+        const rcode = nsHop.response?.rcode || 'NOERROR';
+        let label;
+        if (rcode === 'NXDOMAIN') {
+          label = 'Answer — NXDOMAIN';
+        } else if (answers.length > 0) {
+          if (recordType.toUpperCase() === 'ALL' && nsHop.type === 'AUTH') {
+            const uniqueTypes = [...new Set(answers.map(ans => ans.typeName))];
+            label = `Answer (${uniqueTypes.join(', ')}) — ${answers.length} records resolved`;
+          } else {
+            const firstAns = answers[0];
+            const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
+            const ttlStr = firstAns.ttl !== undefined ? `, TTL ${firstAns.ttl}s` : '';
+            label = `Answer (${firstAns.typeName}) — ${valStr}${ttlStr}`;
+          }
+        } else {
+          label = `Answer — RCODE ${rcode}`;
+        }
+
+        edges.push({
+          step: stepNum++,
+          from: nsHop.id,
+          to: localHop.id,
+          label,
+          type: 'answer'
+        });
+      }
+    }
+
+    // Step Final Response: Recursive → Stub
+    const lastNsHop = nsHops[nsHops.length - 1];
+    const responseSource = lastNsHop || localHop;
+    const rcode = responseSource.response?.rcode || 'NOERROR';
+    const answers = responseSource.response?.answers || [];
+    let responseLabel;
+    if (rcode === 'NXDOMAIN') {
+      responseLabel = 'Response — NXDOMAIN';
+    } else if (answers.length > 0) {
+      if (recordType.toUpperCase() === 'ALL') {
+        const uniqueTypes = [...new Set(answers.map(ans => ans.typeName))];
+        responseLabel = `Response (${uniqueTypes.join(', ')}) — ${answers.length} records`;
+      } else {
+        const firstAns = answers[0];
+        const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
+        responseLabel = `Response (${firstAns.typeName}) — ${valStr}`;
+      }
+    } else {
+      responseLabel = `Response — RCODE ${rcode}`;
+    }
+
+    edges.push({
+      step: stepNum++,
+      from: localHop.id,
+      to: clientHop.id,
+      label: responseLabel,
+      type: 'answer'
+    });
+
+    if (cnameHop) {
+      cnameHop.step = stepNum;
+      const nextSeg = segments[sIdx + 1];
+      const nextClientHop = nextSeg?.find(h => h.type === 'CLIENT');
+
+      edges.push({
+        step: stepNum++,
+        from: clientHop.id,
+        to: cnameHop.id,
+        label: `CNAME Alias — ${cnameHop.cnameFrom} → ${cnameHop.cnameTo}`,
+        type: 'referral'
+      });
+
+      if (nextClientHop) {
+        edges.push({
+          step: stepNum++,
+          from: cnameHop.id,
+          to: nextClientHop.id,
+          label: `Resolve ${cnameHop.cnameTo}`,
+          type: 'query'
+        });
       }
     }
   }
