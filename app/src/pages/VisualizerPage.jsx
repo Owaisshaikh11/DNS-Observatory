@@ -14,10 +14,16 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
   const logLines = [];
   if (!hopsArray || hopsArray.length === 0) return logLines;
 
-  for (let i = 0; i <= activeStepIndex; i++) {
-    const hop = hopsArray[i];
-    if (!hop) continue;
+  // Filter hops that are reached based on activeStepIndex
+  const activeHops = hopsArray.filter(hop => {
+    if (hop.type === 'CLIENT' || hop.type === 'LOCAL') {
+      return activeStepIndex >= 1;
+    }
+    return hop.step !== undefined && hop.step <= activeStepIndex;
+  });
 
+  for (let i = 0; i < activeHops.length; i++) {
+    const hop = activeHops[i];
     const timeStr = `[${(hop.cumulativeMs / 1000).toFixed(3)}s]`;
     const hopDomain = hop.queryDomain || domVal;
 
@@ -26,12 +32,15 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
       if (recTypeVal === 'ALL') {
         logLines.push({ time: timeStr, source: 'RFC-8482', text: `Notice: ANY query deprecated by RFC 8482. Resolving types A, AAAA, MX, TXT, NS in parallel.` });
       }
-      const nextHop = hopsArray[i + 1];
-      const isCacheHit = nextHop && nextHop.label && nextHop.label.includes('Cache Hit');
-      if (isCacheHit) {
-        logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending query to Recursive Resolver at ${nextHop.ip || '1.1.1.1'}` });
-      } else {
-        logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Recursive Resolver` });
+      const hasNextLocal = activeHops.some(h => h.type === 'LOCAL');
+      if (hasNextLocal) {
+        const nextHop = hopsArray.find(h => h.type === 'LOCAL');
+        const isCacheHit = nextHop && nextHop.label && nextHop.label.includes('Cache Hit');
+        if (isCacheHit) {
+          logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending query to Recursive Resolver at ${nextHop.ip || '1.1.1.1'}` });
+        } else {
+          logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Recursive Resolver` });
+        }
       }
     } else if (hop.type === 'LOCAL') {
       const isCacheHit = hop.label && hop.label.includes('Cache Hit');
@@ -62,7 +71,11 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
         logLines.push({ time: timeStr, source: 'AUTH', text: `NXDOMAIN response code returned. Requested domain target does not exist!` });
       } else {
         logLines.push({ time: timeStr, source: 'AUTH', text: `Final answer received (RCODE: ${rcode}, AA Flag: ${hop.response?.flags?.includes('AA') ? '1' : '0'}). Found ${answersCount} answers.` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. Retransmitting payload to Stub Resolver.` });
+        
+        const isFinalStepReached = activeStepIndex >= hop.step + 2;
+        if (isFinalStepReached) {
+          logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. Retransmitting payload to Stub Resolver.` });
+        }
       }
     } else if (hop.type === 'CNAME_REDIRECT') {
       logLines.push({ time: timeStr, source: 'CNAME', text: `CNAME alias redirection: "${hop.cnameFrom.toUpperCase()}" -> "${hop.cnameTo.toUpperCase()}"` });
@@ -190,9 +203,9 @@ export default function VisualizerPage() {
 
   // Playback timer loop
   useEffect(() => {
-    if (playbackState !== 'PLAYING' || !traceData || hops.length === 0) return;
+    if (playbackState !== 'PLAYING' || !traceData || edges.length === 0) return;
 
-    if (activeStep >= hops.length - 1) {
+    if (activeStep >= edges.length) {
       const finalStatus = traceData.status || 'COMPLETE';
       useTraceStore.setState({
         playbackState: finalStatus === 'NOERROR' ? 'COMPLETE' : finalStatus,
@@ -207,7 +220,7 @@ export default function VisualizerPage() {
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [playbackState, activeStep, isSlowMo, traceData, hops.length, setActiveStep]);
+  }, [playbackState, activeStep, isSlowMo, traceData, edges.length, setActiveStep]);
 
   // Real-time TTL Countdown timer (ticks up seconds elapsed since completion)
   useEffect(() => {
@@ -266,11 +279,11 @@ export default function VisualizerPage() {
   }, [activeStep, setActiveStep]);
 
   const handleNext = useCallback(() => {
-    if (activeStep < hops.length - 1) {
+    if (activeStep < edges.length) {
       useTraceStore.setState({ playbackState: 'PAUSED' });
       setActiveStep(activeStep + 1);
     }
-  }, [activeStep, hops.length, setActiveStep]);
+  }, [activeStep, edges.length, setActiveStep]);
 
   const handleReplay = useCallback(() => {
     setSecondsElapsed(0);
@@ -471,7 +484,12 @@ export default function VisualizerPage() {
   const additionalRecords = finalHop?.response?.additional || [];
 
   // Get currently inspected hop (selected hop or defaults to active playback step)
-  const currentInspectedHop = hops.find((h) => h.id === selectedHop) || hops[activeStep];
+  const activeEdge = edges.find(e => e.step === activeStep);
+  const defaultInspectedHop = activeEdge
+    ? (hops.find(h => h.id === activeEdge.to) || hops.find(h => h.id === activeEdge.from))
+    : hops[hops.length - 1];
+
+  const currentInspectedHop = hops.find((h) => h.id === selectedHop) || defaultInspectedHop || hops[0];
 
   const getHudStats = (hop) => {
     if (!hop) return null;
@@ -679,7 +697,7 @@ export default function VisualizerPage() {
             </button>
             <button
               onClick={handleNext}
-              disabled={activeStep === hops.length - 1}
+              disabled={activeStep === edges.length}
               className="px-2 py-0.5 border border-ink/20 bg-base text-ink font-bold hover:border-ink hover:text-accent hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0d0d0d] active:translate-y-0 active:shadow-none transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
             >
               NEXT ▶
@@ -909,15 +927,20 @@ export default function VisualizerPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* Latency Legend */}
-              <div className="flex items-center gap-1.5">
-                <span className="opacity-50">Latency:</span>
-                <span className="w-2 h-2 bg-[#22C55E]" title="<40ms" />
-                <span className="text-[8px]">&lt;40ms</span>
-                <span className="w-2 h-2 bg-[#FF4D00]" title="40-150ms" />
-                <span className="text-[8px]">40-150ms</span>
-                <span className="w-2 h-2 bg-[#EF4444]" title=">150ms" />
-                <span className="text-[8px]">&gt;150ms</span>
+              {/* Connection Type Legend */}
+              <div className="flex items-center gap-3.5 text-[8.5px] font-bold">
+                <div className="flex items-center gap-1.5" title="Outbound DNS query">
+                  <span className="w-4 h-0.5 bg-[#0066FF] block rounded-sm" />
+                  <span className="opacity-80">Query</span>
+                </div>
+                <div className="flex items-center gap-1.5" title="Iterative delegation referral response">
+                  <span className="w-4 h-0.5 border-t-2 border-dashed border-[#FF4D00] block" />
+                  <span className="opacity-80">Referral (Response)</span>
+                </div>
+                <div className="flex items-center gap-1.5" title="Final authoritative answer">
+                  <span className="w-4 h-0.5 bg-[#22C55E] block rounded-sm" />
+                  <span className="opacity-80">Final Answer</span>
+                </div>
               </div>
               <span className="opacity-30">|</span>
               {/* Authoritative response AA legend */}

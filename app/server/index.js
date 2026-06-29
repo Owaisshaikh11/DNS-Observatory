@@ -200,7 +200,7 @@ async function start() {
 
           const clientHop = {
             id: 'client-0',
-            step: 0,
+            step: 1,
             type: 'CLIENT',
             label: 'Stub Resolver',
             server: null,
@@ -308,7 +308,19 @@ async function start() {
             hopCount: 2,
             hops: [clientHop, localHop],
             edges: [
-              { from: 'client-0', to: 'local-0', label: 'Cache Hit (0ms)' }
+              { step: 1, from: 'client-0', to: 'local-0', label: `Query (${cleanType}) — ${cleanDomain}`, type: 'query' },
+              { step: 2, from: 'local-0', to: 'client-0', label: (() => {
+                const answers = cached.answers || [];
+                if (cached.status === 'NXDOMAIN') {
+                  return 'Response — NXDOMAIN';
+                } else if (answers.length > 0) {
+                  const firstAns = answers[0];
+                  const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
+                  return `Response (${firstAns.typeName || cleanType}) — ${valStr}`;
+                } else {
+                  return `Response — RCODE ${cached.status}`;
+                }
+              })(), type: 'answer' }
             ],
             timestamp: Date.now(),
             isCacheHit: true
