@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.1.0](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v2.0.0...v2.1.0) (2026-06-29)
+
+
+### Features
+
+* **resolver cache:** hide cache flush and eviction buttons in production ([b07f19c](https://github.com/Owaisshaikh11/DNS-Observatory/commit/b07f19ccad57150f63c01475ce25750f1ff9aeb6))
+* **visualizer:** improve resolution graph layout and parallel query paths for batched query ([9d3eaa9](https://github.com/Owaisshaikh11/DNS-Observatory/commit/9d3eaa925d9f2aeacdf91e3b82551f6e4168ccf7)), closes [#2563](https://github.com/Owaisshaikh11/DNS-Observatory/issues/2563)
+
+
+### Bug Fixes
+
+* **ui:** fix hop numbering and toast styles, add icons for resolvers(google,cloudflare) ([b23f66a](https://github.com/Owaisshaikh11/DNS-Observatory/commit/b23f66a8da6dcb1797a3f4bd5090dd872cf4d731))
+
 ## [2.0.0](https://github.com/Owaisshaikh11/DNS-Observatory/compare/v1.0.1...v2.0.0) (2026-06-28)
 
 
