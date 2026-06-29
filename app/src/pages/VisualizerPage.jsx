@@ -746,9 +746,9 @@ export default function VisualizerPage() {
                   initial={{ opacity: 0, y: 8, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                  className="absolute right-0 top-full mt-2.5 w-72 border-2 border-ink bg-[#FF4D00] text-ink p-3 shadow-[3px_3px_0_0_#0D0D0D] font-mono text-[9.5px] leading-relaxed z-50 flex flex-col gap-1 text-left"
+                  className="absolute right-0 top-full mt-2.5 w-72 border border-ink bg-base/95 backdrop-blur-md text-ink p-3.5 shadow-[3px_3px_0_0_var(--color-accent)] font-mono text-[9.5px] leading-relaxed z-50 flex flex-col gap-1.5 text-left"
                 >
-                  <div className="flex justify-between items-center border-b border-ink/20 pb-1 mb-1 font-display font-black text-[9.5px] uppercase tracking-wide">
+                  <div className="flex justify-between items-center border-b border-ink/10 pb-1 mb-1 font-display font-black text-[10px] uppercase tracking-wide text-accent">
                     <span>Cache Ready!</span>
                     <button
                       onClick={(e) => {
@@ -756,12 +756,12 @@ export default function VisualizerPage() {
                         setShowNudge(false);
                         sessionStorage.setItem('dns_cache_nudge_shown', 'true');
                       }}
-                      className="text-ink/65 hover:text-ink cursor-pointer font-sans text-xs font-bold leading-none"
+                      className="text-ink/40 hover:text-ink cursor-pointer font-sans text-xs font-bold leading-none"
                     >
                       ✕
                     </button>
                   </div>
-                  <p className="font-sans font-medium text-[9.5px]">
+                  <p className="font-sans font-medium text-[9.5px] text-ink/80">
                     Record cached! Open the Cache Panel to toggle Cache Mode and test speed differences.
                   </p>
                 </motion.div>

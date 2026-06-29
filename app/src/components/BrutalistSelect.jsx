@@ -20,7 +20,9 @@ export default function BrutalistSelect({ options, value, onChange, label, width
     typeof opt === 'string' ? { value: opt, label: opt } : opt
   );
 
-  const selectedLabel = normalizedOptions.find(o => o.value === value)?.label || value;
+  const selectedOption = normalizedOptions.find(o => o.value === value);
+  const selectedLabel = selectedOption?.label || value;
+  const triggerClassName = selectedOption?.className || '';
 
   return (
     <div className={`relative ${width} z-30 font-mono interactive-hover`} ref={containerRef}>
@@ -31,7 +33,7 @@ export default function BrutalistSelect({ options, value, onChange, label, width
         className="w-full brutalist-select-trigger uppercase flex justify-between items-center outline-none cursor-pointer"
         onClick={() => setIsOpen(!isOpen)}
       >
-        <span className="truncate">{selectedLabel}</span>
+        <span className={`truncate ${triggerClassName}`}>{selectedLabel}</span>
         <span className={`text-[8px] transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
@@ -48,7 +50,7 @@ export default function BrutalistSelect({ options, value, onChange, label, width
               <button
                 type="button"
                 key={option.value}
-                className="brutalist-select-option text-left cursor-pointer outline-none"
+                className={`brutalist-select-option text-left cursor-pointer outline-none ${option.className || ''}`}
                 onClick={() => {
                   onChange(option.value);
                   setIsOpen(false);

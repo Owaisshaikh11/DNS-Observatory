@@ -545,7 +545,10 @@ export default function EntryPage() {
                   <BrutalistSelect
                     label="Record Type"
                     value={selectedRecord}
-                    options={['ALL', 'A', 'AAAA', 'MX', 'TXT', 'CNAME', 'PTR', 'SRV']}
+                    options={[
+                      { value: 'ALL', label: 'BATCH ALL', className: 'text-ink/60 font-bold' },
+                      'A', 'AAAA', 'MX', 'TXT', 'CNAME', 'PTR', 'SRV'
+                    ]}
                     onChange={setSelectedRecord}
                     width="w-full md:w-[220px]"
                   />
