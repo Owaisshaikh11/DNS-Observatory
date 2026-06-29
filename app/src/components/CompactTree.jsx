@@ -31,7 +31,7 @@ const formatLabelLines = (label) => {
   return [title, details];
 };
 
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit }) {
+export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit, recordType }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
 
   // Dynamic layout calculations: split hops into CNAME-based segments
@@ -53,9 +53,9 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     return segs;
   }, [hops]);
 
-  const segWidth = 900;
-  const gap = 200;
-  const W = Math.max(1200, segments.length * (segWidth + gap));
+  const segWidth = 1400;
+  const gap = 180;
+  const W = Math.max(1600, segments.length * (segWidth + gap));
   const H = 500;
   const paddingX = 30;
   const columns = segments.length * 2.5;
@@ -86,7 +86,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       if (localHop) {
         calculatedNodes.push({
           ...localHop,
-          treeX: segmentStartX + 300,
+          treeX: segmentStartX + 420,
           treeY: 218,
           isPlaceholder: false
         });
@@ -110,7 +110,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
 
           calculatedNodes.push({
             ...hop,
-            treeX: segmentStartX + 680, // Stacked on the right
+            treeX: segmentStartX + 860, // Stacked on the right
             treeY,
             isPlaceholder: false
           });
@@ -121,7 +121,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
       if (cnameHop) {
         calculatedNodes.push({
           ...cnameHop,
-          treeX: segmentStartX + 960,
+          treeX: segmentStartX + 1180,
           treeY: 218,
           isPlaceholder: false
         });
@@ -265,103 +265,187 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
   };
 
   // Helper for computing orthogonal arrow coordinates and corners
-  const getEdgeCoords = (fromNode, toNode, edgeType) => {
-    let x1 = fromNode.treeX + NW / 2;
-    let y1 = fromNode.treeY + NH / 2;
-    let x2 = toNode.treeX + NW / 2;
-    let y2 = toNode.treeY + NH / 2;
+  // Helper for computing parallel path coordinates when type is ALL
+  const getParallelPathD = (fromNode, toNode, edgeType, dy) => {
+    const localNode = fromNode.type === 'LOCAL' ? fromNode : toNode;
+    const nsNode = fromNode.type === 'LOCAL' ? toNode : fromNode;
+    const isQuery = edgeType === 'query';
+    const x1_q = localNode.treeX + 60;
+    const y1_q = localNode.treeY + NH;
+    const x2_q = nsNode.treeX;
+    const y2_q = nsNode.treeY + 20;
 
-    // Adjust boundaries to start and end precisely at card edges
-    if (fromNode.treeX + NW <= toNode.treeX) {
-      x1 = fromNode.treeX + NW;
-      x2 = toNode.treeX;
-      y1 = fromNode.treeY + NH / 2 - (edgeType === 'query' ? 7 : -7);
-      y2 = toNode.treeY + NH / 2 - (edgeType === 'query' ? 7 : -7);
-    } else if (toNode.treeX + NW <= fromNode.treeX) {
-      x1 = fromNode.treeX;
-      x2 = toNode.treeX + NW;
-      y1 = fromNode.treeY + NH / 2 - (edgeType === 'query' ? 7 : -7);
-      y2 = toNode.treeY + NH / 2 - (edgeType === 'query' ? 7 : -7);
-    } else if (fromNode.treeY + NH <= toNode.treeY) {
-      y1 = fromNode.treeY + NH;
-      y2 = toNode.treeY;
-      x1 = fromNode.treeX + NW / 2 - (edgeType === 'query' ? 7 : -7);
-      x2 = toNode.treeX + NW / 2 - (edgeType === 'query' ? 7 : -7);
-    } else if (toNode.treeY + NH <= fromNode.treeY) {
-      y1 = fromNode.treeY;
-      y2 = toNode.treeY + NH;
-      x1 = fromNode.treeX + NW / 2 - (edgeType === 'query' ? 7 : -7);
-      x2 = toNode.treeX + NW / 2 - (edgeType === 'query' ? 7 : -7);
+    const x1_r = nsNode.treeX;
+    const y1_r = nsNode.treeY + 44;
+    const x2_r = localNode.treeX + 160;
+    const y2_r = localNode.treeY + NH;
+
+    if (isQuery) {
+      return `M ${x1_q} ${y1_q} L ${x1_q} ${y2_q + dy} L ${x2_q} ${y2_q + dy}`;
+    } else {
+      return `M ${x1_r} ${y1_r + dy} L ${x2_r} ${y1_r + dy} L ${x2_r} ${y2_r}`;
+    }
+  };
+
+  const getEdgeCoords = (fromNode, toNode, edgeType) => {
+    let x1, y1, x2, y2;
+
+    const isClientHop = (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') || 
+                        (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT');
+    
+    const isCnameHop = fromNode.type === 'CNAME_REDIRECT' || toNode.type === 'CNAME_REDIRECT';
+
+    if (isClientHop) {
+      if (fromNode.type === 'CLIENT') {
+        // Query (Stub -> Recursive)
+        x1 = fromNode.treeX + NW;
+        y1 = fromNode.treeY + 20;
+        x2 = toNode.treeX;
+        y2 = toNode.treeY + 20;
+      } else {
+        // Response (Recursive -> Stub)
+        x1 = fromNode.treeX;
+        y1 = fromNode.treeY + 44;
+        x2 = toNode.treeX + NW;
+        y2 = toNode.treeY + 44;
+      }
+      return { x1, y1, x2, y2, pathD: `M ${x1} ${y1} L ${x2} ${y2}`, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
     }
 
+    if (isCnameHop) {
+      if (fromNode.treeX + NW <= toNode.treeX) {
+        x1 = fromNode.treeX + NW;
+        y1 = fromNode.treeY + NH / 2;
+        x2 = toNode.treeX;
+        y2 = toNode.treeY + NH / 2;
+      } else {
+        x1 = fromNode.treeX;
+        y1 = fromNode.treeY + NH / 2;
+        x2 = toNode.treeX + NW;
+        y2 = toNode.treeY + NH / 2;
+      }
+      return { x1, y1, x2, y2, pathD: `M ${x1} ${y1} L ${x2} ${y2}`, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
+    }
+
+    // Nameserver Hops (Recursive <-> Nameserver)
+    const localNode = fromNode.type === 'LOCAL' ? fromNode : toNode;
+    const nsNode = fromNode.type === 'LOCAL' ? toNode : fromNode;
+    const isQuery = edgeType === 'query';
+
+    const nsY = nsNode.treeY;
+    
     let pathD;
+    let midX, midY;
 
-    // Center point calculations for tooltips and hover triggers
-    let midX = (x1 + x2) / 2;
-    let midY = (y1 + y2) / 2;
-
-    if (fromNode.type === 'LOCAL' && (toNode.type === 'ROOT' || toNode.type === 'TLD' || toNode.type === 'AUTH')) {
-      // Outbound query to nameserver: goes right, vertical, then right
-      const x_mid = fromNode.treeX + NW + 65;
-      pathD = `M ${x1} ${y1} L ${x_mid} ${y1} L ${x_mid} ${y2} L ${x2} ${y2}`;
-      midX = x_mid;
-      midY = (y1 + y2) / 2;
-    } else if ((fromNode.type === 'ROOT' || fromNode.type === 'TLD' || fromNode.type === 'AUTH') && toNode.type === 'LOCAL') {
-      // Inbound response/referral from nameserver: goes left, vertical, then left
-      const x_mid2 = fromNode.treeX - 65;
-      pathD = `M ${x1} ${y1} L ${x_mid2} ${y1} L ${x_mid2} ${y2} L ${x2} ${y2}`;
-      midX = x_mid2;
-      midY = (y1 + y2) / 2;
+    if (nsY < 200) {
+      // Top-edge routing (above Recursive)
+      if (isQuery) {
+        x1 = localNode.treeX + 60;
+        y1 = localNode.treeY;
+        x2 = nsNode.treeX;
+        y2 = nsNode.treeY + 20;
+        pathD = `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y2;
+      } else {
+        x1 = nsNode.treeX;
+        y1 = nsNode.treeY + 44;
+        x2 = localNode.treeX + 160;
+        y2 = localNode.treeY;
+        pathD = `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y1;
+      }
+    } else if (nsY > 230) {
+      // Bottom-edge routing (below Recursive)
+      if (isQuery) {
+        x1 = localNode.treeX + 60;
+        y1 = localNode.treeY + NH;
+        x2 = nsNode.treeX;
+        y2 = nsNode.treeY + 20;
+        pathD = `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y2;
+      } else {
+        x1 = nsNode.treeX;
+        y1 = nsNode.treeY + 44;
+        x2 = localNode.treeX + 160;
+        y2 = localNode.treeY + NH;
+        pathD = `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2}`;
+        midX = (x1 + x2) / 2;
+        midY = y1;
+      }
     } else {
-      // Straight lines for Stub <-> Recursive or CNAME transitions
+      // Right-edge routing (horizontally aligned)
+      if (isQuery) {
+        x1 = localNode.treeX + NW;
+        y1 = localNode.treeY + 20;
+        x2 = nsNode.treeX;
+        y2 = nsNode.treeY + 20;
+      } else {
+        x1 = nsNode.treeX;
+        y1 = nsNode.treeY + 44;
+        x2 = localNode.treeX + NW;
+        y2 = localNode.treeY + 44;
+      }
       pathD = `M ${x1} ${y1} L ${x2} ${y2}`;
+      midX = (x1 + x2) / 2;
+      midY = (y1 + y2) / 2;
     }
 
     return { x1, y1, x2, y2, pathD, midX, midY };
   };
 
   // Helper for clean text label positioning
-  const getLabelCoords = (fromNode, toNode) => {
-    if (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') {
-      // Stub -> Recursive (Step 1 Query)
-      const midX = (fromNode.treeX + NW + toNode.treeX) / 2;
-      return {
-        x: midX,
-        y: 228,
-        textAnchor: 'middle'
-      };
+  const getLabelCoords = (fromNode, toNode, edgeType) => {
+    const isClientHop = (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') || 
+                        (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT');
+    
+    if (isClientHop) {
+      if (fromNode.type === 'CLIENT') {
+        const midX = (fromNode.treeX + NW + toNode.treeX) / 2;
+        return {
+          x: midX,
+          y: fromNode.treeY + 20 - 6,
+          textAnchor: 'middle'
+        };
+      } else {
+        const midX = (fromNode.treeX + toNode.treeX + NW) / 2;
+        return {
+          x: midX,
+          y: fromNode.treeY + 44 + 11,
+          textAnchor: 'middle'
+        };
+      }
     }
-    if (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT') {
-      // Recursive -> Stub (Step 8 Response)
-      const midX = (fromNode.treeX + toNode.treeX + NW) / 2;
+
+    const isCnameHop = fromNode.type === 'CNAME_REDIRECT' || toNode.type === 'CNAME_REDIRECT';
+    if (isCnameHop) {
       return {
-        x: midX,
-        y: 268,
+        x: (fromNode.treeX + toNode.treeX + NW) / 2,
+        y: (fromNode.treeY + toNode.treeY) / 2 - 10,
         textAnchor: 'middle'
       };
     }
 
-    if (fromNode.type === 'LOCAL') {
-      // Outbound Query: horizontal segment near target nameserver
+    // Nameserver hops (Recursive <-> Nameserver)
+    const nsNode = fromNode.type === 'LOCAL' ? toNode : fromNode;
+    const isQuery = edgeType === 'query';
+
+    // We align all text to the left side of the nameserver cards (end anchor)
+    if (isQuery) {
       return {
-        x: toNode.treeX - 30,
-        y: toNode.treeY + NH / 2 - 18,
+        x: nsNode.treeX - 30,
+        y: nsNode.treeY + 20 - 5,
         textAnchor: 'end'
       };
-    } else if (toNode.type === 'LOCAL') {
-      // Inbound Referral/Answer: horizontal segment near source nameserver
+    } else {
       return {
-        x: fromNode.treeX - 30,
-        y: fromNode.treeY + NH / 2 + 16,
+        x: nsNode.treeX - 30,
+        y: nsNode.treeY + 44 + 11,
         textAnchor: 'end'
       };
     }
-
-    return {
-      x: (fromNode.treeX + toNode.treeX) / 2,
-      y: (fromNode.treeY + toNode.treeY) / 2 - 10,
-      textAnchor: 'middle'
-    };
   };
 
   return (
@@ -396,7 +480,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
               <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(13,13,13,0.06)" strokeWidth="0.5" />
             </pattern>
             <marker id="arrow-query" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-ink)" />
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563EB" />
             </marker>
             <marker id="arrow-referral" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
               <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-accent)" />
@@ -428,7 +512,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
 
             if (isActive) {
               if (edge.type === 'query') {
-                strokeColor = 'var(--color-ink)';
+                strokeColor = '#2563EB';
                 isDashed = false;
               } else if (edge.type === 'referral') {
                 strokeColor = 'var(--color-accent)';
@@ -444,7 +528,7 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
               : 'url(#arrow-inactive)';
 
             const isHovered = activeTooltip?.edge === edge;
-            const labelPos = getLabelCoords(fromNode, toNode);
+            const labelPos = getLabelCoords(fromNode, toNode, edge.type);
 
             // Compute badge and text positions relative to nameserver card (nsNode) if present
             const isClientHop = (fromNode.type === 'CLIENT' && toNode.type === 'LOCAL') || (fromNode.type === 'LOCAL' && toNode.type === 'CLIENT');
@@ -452,22 +536,139 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
               ? toNode
               : ((fromNode.type === 'ROOT' || fromNode.type === 'TLD' || fromNode.type === 'AUTH') ? fromNode : null);
 
-            let badgeX = labelPos.x - 14;
-            let textX = labelPos.x;
-            let textAnchor = labelPos.textAnchor || 'middle';
+            let badgeX = labelPos.x - 35;
+            let textX = labelPos.x - 20;
+            let textAnchor = 'start';
 
             if (isClientHop) {
               badgeX = labelPos.x - 45;
               textX = labelPos.x - 30;
               textAnchor = 'start';
             } else if (nsNode) {
-              badgeX = nsNode.treeX - 24;
-              textX = nsNode.treeX - 30;
+              badgeX = nsNode.treeX - 25;
+              textX = nsNode.treeX - 32;
               textAnchor = 'end';
             }
 
-            const badgeY = labelPos.y - 11;
+            const lines = formatLabelLines(edge.label);
             const textY = labelPos.y;
+            const adjustedTextY = edge.type === 'query' ? textY - (lines.length - 1) * 11 : textY;
+            const badgeY = adjustedTextY - 10;
+
+            const isParallel = recordType === 'ALL' && (fromNode.type === 'AUTH' || toNode.type === 'AUTH');
+
+            if (isParallel) {
+              const dyValues = [-6, -3, 0, 3, 6];
+              return (
+                <g key={i}>
+                  {dyValues.map((dy, idx) => {
+                    const pD = getParallelPathD(fromNode, toNode, edge.type, dy);
+                    const isMiddle = idx === 2;
+                    const pathMarker = isMiddle ? markerEnd : 'none';
+
+                    return (
+                      <g key={idx}>
+                        {isActive && isHovered && (
+                          <path
+                            d={pD}
+                            fill="none"
+                            stroke={strokeColor}
+                            strokeWidth={3}
+                            className="opacity-20"
+                          />
+                        )}
+                        <path
+                          d={pD}
+                          fill="none"
+                          stroke={strokeColor}
+                          strokeWidth={isActive ? 1.0 : 0.8}
+                          strokeDasharray={isDashed ? '4 3' : 'none'}
+                          markerEnd={pathMarker}
+                          className={`${isActive ? 'arrow-path' : ''}`}
+                          style={{ transition: 'stroke-width 0.2s, stroke 0.4s' }}
+                        />
+                        {isAnimating && (
+                          <circle r="2" fill={strokeColor}>
+                            <animateMotion dur={`${0.65 + idx * 0.15}s`} repeatCount="indefinite" path={pD} />
+                            <animate attributeName="r" values="1.5;3;1.5" dur="0.8s" repeatCount="indefinite" />
+                          </circle>
+                        )}
+                      </g>
+                    );
+                  })}
+
+                  {/* Step badge and label text (drawn once) */}
+                  <g className="select-none pointer-events-none">
+                    <rect
+                      width="13"
+                      height="13"
+                      x={badgeX}
+                      y={badgeY}
+                      fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.15)'}
+                      stroke="var(--color-ink)"
+                      strokeWidth="0.5"
+                    />
+                    <text
+                      x={badgeX + 6.5}
+                      y={badgeY + 9.5}
+                      textAnchor="middle"
+                      fill="var(--color-base)"
+                      fontSize="8.5px"
+                      fontWeight="bold"
+                      fontFamily="Space Grotesk"
+                    >
+                      {edge.step}
+                    </text>
+                    <text
+                      x={textX}
+                      y={adjustedTextY}
+                      textAnchor={textAnchor}
+                      fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.3)'}
+                      fontSize="9px"
+                      fontFamily="JetBrains Mono"
+                      style={{
+                        textShadow: '1px 1px 0 var(--color-base), -1px 1px 0 var(--color-base), 1px -1px 0 var(--color-base), -1px -1px 0 var(--color-base)'
+                      }}
+                    >
+                      {lines.map((line, idx) => (
+                        <tspan
+                          key={idx}
+                          x={textX}
+                          dy={idx === 0 ? 0 : 11}
+                          fontWeight={idx === 0 ? 'bold' : 'normal'}
+                          fill={idx === 0 ? undefined : 'var(--color-ink)'}
+                          opacity={idx === 2 ? 0.65 : 1}
+                        >
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  </g>
+
+                  {/* Interactive hover overlay path (middle path is enough for trigger) */}
+                  {isActive && (
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={12}
+                      className="cursor-pointer interactive"
+                      onMouseEnter={() => {
+                        setActiveTooltip({
+                          edge,
+                          toNode,
+                          x: midX,
+                          y: midY - 80,
+                        });
+                      }}
+                      onMouseLeave={() => {
+                        setActiveTooltip(null);
+                      }}
+                    />
+                  )}
+                </g>
+              );
+            }
 
             return (
               <g key={i}>
@@ -496,20 +697,20 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                 {/* Step badge and label text */}
                 <g className="select-none pointer-events-none">
                   <rect
-                    width="11"
-                    height="11"
+                    width="13"
+                    height="13"
                     x={badgeX}
                     y={badgeY}
-                    fill={isActive ? (edge.type === 'query' ? '#0066FF' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.15)'}
+                    fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.15)'}
                     stroke="var(--color-ink)"
                     strokeWidth="0.5"
                   />
                   <text
-                    x={badgeX + 5.5}
-                    y={badgeY + 8.5}
+                    x={badgeX + 6.5}
+                    y={badgeY + 9.5}
                     textAnchor="middle"
                     fill="var(--color-base)"
-                    fontSize="7.5px"
+                    fontSize="8.5px"
                     fontWeight="bold"
                     fontFamily="Space Grotesk"
                   >
@@ -517,20 +718,20 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                   </text>
                   <text
                     x={textX}
-                    y={textY}
+                    y={adjustedTextY}
                     textAnchor={textAnchor}
-                    fill={isActive ? (edge.type === 'query' ? '#0066FF' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.3)'}
-                    fontSize="7.5px"
+                    fill={isActive ? (edge.type === 'query' ? '#2563EB' : edge.type === 'referral' ? '#FF4D00' : '#22C55E') : 'rgba(13,13,13,0.3)'}
+                    fontSize="9px"
                     fontFamily="JetBrains Mono"
                     style={{
                       textShadow: '1px 1px 0 var(--color-base), -1px 1px 0 var(--color-base), 1px -1px 0 var(--color-base), -1px -1px 0 var(--color-base)'
                     }}
                   >
-                    {formatLabelLines(edge.label).map((line, idx) => (
+                    {lines.map((line, idx) => (
                       <tspan
                         key={idx}
                         x={textX}
-                        dy={idx === 0 ? 0 : 10}
+                        dy={idx === 0 ? 0 : 11}
                         fontWeight={idx === 0 ? 'bold' : 'normal'}
                         fill={idx === 0 ? undefined : 'var(--color-ink)'}
                         opacity={idx === 2 ? 0.65 : 1}
@@ -617,7 +818,9 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                     className="overflow-visible"
                   >
                     <div
-                      className={`w-full h-full border flex flex-col justify-start gap-1.5 p-2 select-none transition-all duration-200 ${
+                      className={`w-full h-full border flex flex-col justify-start select-none transition-all duration-200 ${
+                        node.type === 'AUTH' ? 'gap-0.5 p-1.5' : 'gap-1.5 p-2'
+                      } ${
                         isFailedTrace && node.id === (hops[hops.length - 1]?.id)
                           ? 'bg-red-50 text-red-600 border-[#EF4444] border-2 shadow-[2px_2px_0_0_#EF4444]'
                           : isSel
@@ -663,6 +866,13 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
                           )}
                         </div>
                       </div>
+
+                      {/* Second line (nameserver hostname) - only for AUTH hops */}
+                      {isReached && node.type === 'AUTH' && (
+                        <div className={`font-mono text-[7.5px] leading-tight break-all truncate ${isSel ? 'text-base/60' : 'text-ink/50'}`}>
+                          {node.server || 'UNKNOWN'}
+                        </div>
+                      )}
 
                       {/* Middle line: IP / Latency or target CNAME */}
                       <div className={`font-mono text-[8px] leading-tight break-all ${isFailedTrace && node.id === (hops[hops.length - 1]?.id) ? 'text-red-500 font-bold' : isSel ? 'text-base/60' : node.type === 'LOCAL' && isReached ? 'text-white/60' : 'text-ink/40'}`}>

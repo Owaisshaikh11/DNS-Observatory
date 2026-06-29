@@ -558,7 +558,7 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', 
       } else {
         type = 'AUTH';
         currentNodeId = `auth-${authCount++}`;
-        label = currentQueryServerZone;
+        label = 'AUTHORITATIVE';
       }
 
       let parsed;
@@ -910,7 +910,7 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', 
         step: stepNum++,
         from: localHop.id,
         to: nsHop.id,
-        label: `Query (${recordType.toUpperCase()}) — ${nsHop.queryDomain}`,
+        label: `Query (${(recordType.toUpperCase() === 'ALL' && nsHop.type !== 'AUTH') ? 'A' : recordType.toUpperCase()}) — ${nsHop.queryDomain}`,
         type: 'query'
       });
 
@@ -950,10 +950,15 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', 
         if (rcode === 'NXDOMAIN') {
           label = 'Answer — NXDOMAIN';
         } else if (answers.length > 0) {
-          const firstAns = answers[0];
-          const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
-          const ttlStr = firstAns.ttl !== undefined ? `, TTL ${firstAns.ttl}s` : '';
-          label = `Answer (${firstAns.typeName}) — ${valStr}${ttlStr}`;
+          if (recordType.toUpperCase() === 'ALL' && nsHop.type === 'AUTH') {
+            const uniqueTypes = [...new Set(answers.map(ans => ans.typeName))];
+            label = `Answer (${uniqueTypes.join(', ')}) — ${answers.length} records resolved`;
+          } else {
+            const firstAns = answers[0];
+            const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
+            const ttlStr = firstAns.ttl !== undefined ? `, TTL ${firstAns.ttl}s` : '';
+            label = `Answer (${firstAns.typeName}) — ${valStr}${ttlStr}`;
+          }
         } else {
           label = `Answer — RCODE ${rcode}`;
         }
@@ -977,9 +982,14 @@ async function iterativeTrace(domain, recordType = 'A', resolverIp = '1.1.1.1', 
     if (rcode === 'NXDOMAIN') {
       responseLabel = 'Response — NXDOMAIN';
     } else if (answers.length > 0) {
-      const firstAns = answers[0];
-      const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
-      responseLabel = `Response (${firstAns.typeName}) — ${valStr}`;
+      if (recordType.toUpperCase() === 'ALL') {
+        const uniqueTypes = [...new Set(answers.map(ans => ans.typeName))];
+        responseLabel = `Response (${uniqueTypes.join(', ')}) — ${answers.length} records`;
+      } else {
+        const firstAns = answers[0];
+        const valStr = typeof firstAns.value === 'string' ? firstAns.value : JSON.stringify(firstAns.value);
+        responseLabel = `Response (${firstAns.typeName}) — ${valStr}`;
+      }
     } else {
       responseLabel = `Response — RCODE ${rcode}`;
     }

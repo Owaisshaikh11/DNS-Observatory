@@ -64,7 +64,7 @@ const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
       logLines.push({ time: timeStr, source: 'TLD', text: `Querying TLD Server: ${hop.label} (${hop.ip})` });
       logLines.push({ time: timeStr, source: 'TLD', text: `Received delegation referral (RCODE: ${hop.response?.rcode || 'NOERROR'}). Found ${hop.response?.authority?.length || 4} authoritative servers.` });
     } else if (hop.type === 'AUTH') {
-      logLines.push({ time: timeStr, source: 'AUTH', text: `Querying Authoritative Server: ${hop.label} (${hop.ip})` });
+      logLines.push({ time: timeStr, source: 'AUTH', text: `Querying Authoritative Server: ${(hop.queryDomain || '').toUpperCase()} (${hop.ip})` });
       const rcode = hop.response?.rcode || 'NOERROR';
       const answersCount = hop.response?.answers?.length || 0;
       if (rcode === 'NXDOMAIN') {
@@ -930,7 +930,7 @@ export default function VisualizerPage() {
               {/* Connection Type Legend */}
               <div className="flex items-center gap-3.5 text-[8.5px] font-bold">
                 <div className="flex items-center gap-1.5" title="Outbound DNS query">
-                  <span className="w-4 h-0.5 bg-[#0066FF] block rounded-sm" />
+                  <span className="w-4 h-0.5 bg-[#2563EB] block rounded-sm" />
                   <span className="opacity-80">Query</span>
                 </div>
                 <div className="flex items-center gap-1.5" title="Iterative delegation referral response">
