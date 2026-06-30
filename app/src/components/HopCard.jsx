@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import FlagBadge from './FlagBadge';
 import WaterfallBar from './WaterfallBar';
 import RecordTable from './RecordTable';
 import HexViewer from './HexViewer';
 import CountryFlag from './CountryFlag';
+import { cleanOrg } from '../utils/layoutMath';
 
 
 const getResolverIcon = (ip, className = "w-3.5 h-3.5") => {
@@ -38,15 +39,7 @@ const getResolverIcon = (ip, className = "w-3.5 h-3.5") => {
   );
 };
 
-const cleanOrg = (org) => {
-  if (!org) return '';
-  return org
-    .replace(/^AS\d+\s+/g, '')
-    .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
-    .trim();
-};
-
-export default function HopCard({ hop, index, totalLatency, isSelected, onSelect, secondsElapsed = 0, isReached = true, isCompleted = true, compact = false }) {
+function HopCard({ hop, index, totalLatency, isSelected, onSelect, isReached = true, isCompleted = true, compact = false }) {
   const [expanded, setExpanded] = useState(false);
   const [showHex, setShowHex] = useState(false);
   const cardRef = useRef(null);
@@ -290,7 +283,6 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
                     <RecordTable
                       records={hop.response.answers}
                       accent={true}
-                      secondsElapsed={secondsElapsed}
                     />
                   </div>
                 )}
@@ -304,7 +296,6 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
                     <RecordTable
                       records={hop.response.authority}
                       accent={false}
-                      secondsElapsed={secondsElapsed}
                     />
                   </div>
                 )}
@@ -318,7 +309,6 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
                     <RecordTable
                       records={hop.response.additional}
                       accent={false}
-                      secondsElapsed={secondsElapsed}
                     />
                   </div>
                 )}
@@ -357,3 +347,5 @@ export default function HopCard({ hop, index, totalLatency, isSelected, onSelect
     </div>
   );
 }
+
+export default memo(HopCard);

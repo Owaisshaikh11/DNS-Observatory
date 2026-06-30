@@ -43,6 +43,7 @@ export const useTraceStore = create((set, get) => ({
   isSlowMo: false,
   realTtl: 0,
   selectedHop: null,
+  selectedHopId: null,
   completedAt: null,
   resolver: '1.1.1.1 (Cloudflare)',
   activeAbortController: null,
@@ -93,6 +94,7 @@ export const useTraceStore = create((set, get) => ({
       traceData: null,
       traceError: null,
       selectedHop: null,
+      selectedHopId: null,
       benchmarkData: null,
       isBenchmarking: isBenchmarkMode,
       completedAt: null,
@@ -165,8 +167,9 @@ export const useTraceStore = create((set, get) => ({
 
   setActiveStep: (step) => set({ activeStep: step }),
   setSelectedHop: (hopId) => set({ selectedHop: hopId }),
+  setSelectedHopId: (hopId) => set({ selectedHopId: hopId }),
   toggleSlowMo: () => set((state) => ({ isSlowMo: !state.isSlowMo })),
-  replayTrace: () => set({ activeStep: 0, playbackState: 'PLAYING', selectedHop: null, completedAt: null }),
+  replayTrace: () => set({ activeStep: 0, playbackState: 'PLAYING', selectedHop: null, selectedHopId: null, completedAt: null }),
   clearRecentQueries: () => {
     set({ recentQueries: [] });
     try {

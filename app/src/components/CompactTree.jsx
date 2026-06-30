@@ -1,16 +1,9 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import CountryFlag from './CountryFlag';
+import { cleanOrg, formatLabelLines, calculateNodePositions } from '../utils/layoutMath';
 
 const NW = 220;
 const NH = 64;
-
-const cleanOrg = (org) => {
-  if (!org) return '';
-  return org
-    .replace(/^AS\d+\s+/g, '')
-    .replace(/,?\s+(Inc\.|L\.L\.C\.|LLC|Corporation|Corp\.|Ltd\.)/g, '')
-    .trim();
-};
 
 const getResolverIcon = (ip, className = "w-3.5 h-3.5") => {
   const cleanIp = (ip || '').toString().trim();
@@ -43,124 +36,22 @@ const getResolverIcon = (ip, className = "w-3.5 h-3.5") => {
   );
 };
 
-const formatLabelLines = (label) => {
-  if (!label) return [];
-  const parts = label.split(' — ');
-  if (parts.length < 2) return [label];
 
-  const title = parts[0];
-  const details = parts[1];
-
-  // If details contains parentheses, split it
-  if (details.includes('(')) {
-    const parenIdx = details.indexOf('(');
-    const mainDetail = details.substring(0, parenIdx).trim();
-    const subDetail = details.substring(parenIdx).trim();
-    return [title, mainDetail, subDetail];
-  }
-
-  return [title, details];
-};
-
-export default function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit, recordType }) {
+function CompactTree({ hops, edges, selectedHop, onSelectHop, activeStep, playbackState, isCacheHit, recordType }) {
   const isFailedTrace = playbackState !== 'IDLE' && playbackState !== 'PLAYING' && playbackState !== 'PAUSED' && playbackState !== 'COMPLETE';
-
-  // Dynamic layout calculations: split hops into CNAME-based segments
-  const segments = useMemo(() => {
-    const segs = [];
-    let currentSegment = [];
-    if (hops) {
-      for (const hop of hops) {
-        currentSegment.push(hop);
-        if (hop.type === 'CNAME_REDIRECT') {
-          segs.push(currentSegment);
-          currentSegment = [];
-        }
-      }
-      if (currentSegment.length > 0) {
-        segs.push(currentSegment);
-      }
-    }
-    return segs;
-  }, [hops]);
 
   const segWidth = 1400;
   const gap = 180;
+  const paddingX = 30;
+
+  // Compute node layouts and partition segments using layoutMath utility
+  const { calculatedNodes: nodes, segments } = useMemo(() => {
+    return calculateNodePositions({ hops, isCacheHit, segWidth, gap, paddingX });
+  }, [hops, isCacheHit]);
+
   const W = Math.max(1600, segments.length * (segWidth + gap));
   const H = 500;
-  const paddingX = 30;
   const columns = segments.length * 2.5;
-
-  const nodes = useMemo(() => {
-    const calculatedNodes = [];
-
-    for (let sIdx = 0; sIdx < segments.length; sIdx++) {
-      const seg = segments[sIdx];
-      const segmentStartX = sIdx * (segWidth + gap) + paddingX;
-
-      const clientHop = seg.find(h => h.type === 'CLIENT');
-      const localHop = seg.find(h => h.type === 'LOCAL');
-      const cnameHop = seg.find(h => h.type === 'CNAME_REDIRECT');
-      const nsHops = seg.filter(h => h.type === 'ROOT' || h.type === 'TLD' || h.type === 'AUTH');
-
-      // Lay out CLIENT (Stub Resolver)
-      if (clientHop) {
-        calculatedNodes.push({
-          ...clientHop,
-          treeX: segmentStartX,
-          treeY: 218,
-          isPlaceholder: false
-        });
-      }
-
-      // Lay out LOCAL (Recursive Resolver - Caching Resolver)
-      if (localHop) {
-        calculatedNodes.push({
-          ...localHop,
-          treeX: segmentStartX + 420,
-          treeY: 218,
-          isPlaceholder: false
-        });
-      }
-
-      // Lay out nameservers (skip Root, TLD, Auth if it is a cache hit)
-      if (!isCacheHit) {
-        nsHops.forEach((hop, idx) => {
-          let treeY = 218;
-          if (nsHops.length === 1) {
-            treeY = 218;
-          } else if (nsHops.length === 2) {
-            treeY = idx === 0 ? 148 : 288;
-          } else if (nsHops.length === 3) {
-            treeY = idx === 0 ? 78 : idx === 1 ? 218 : 358;
-          } else if (nsHops.length > 3) {
-            const startY = 30;
-            const endY = 406;
-            treeY = startY + (idx * (endY - startY)) / (nsHops.length - 1);
-          }
-
-          calculatedNodes.push({
-            ...hop,
-            treeX: segmentStartX + 860, // Stacked on the right
-            treeY,
-            isPlaceholder: false
-          });
-        });
-      }
-
-      // Lay out CNAME_REDIRECT (redirection node at segment end)
-      if (cnameHop) {
-        calculatedNodes.push({
-          ...cnameHop,
-          treeX: segmentStartX + 1180,
-          treeY: 218,
-          isPlaceholder: false
-        });
-      }
-    }
-
-    return calculatedNodes;
-  }, [segments, isCacheHit]);
 
   const edgesToRender = useMemo(() => edges || [], [edges]);
 
@@ -1011,3 +902,5 @@ export default function CompactTree({ hops, edges, selectedHop, onSelectHop, act
     </div>
   );
 }
+
+export default memo(CompactTree);
