@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import HistoryDropdown from './HistoryDropdown';
+import { inputErrorVariants } from '../constants/animations';
 
 const placeholderDomains = ['GOOGLE.COM', 'GITHUB.COM', 'WIKIPEDIA.ORG'];
 
@@ -8,7 +9,8 @@ export default function SearchInput({
   domainInput,
   setDomainInput,
   isFocused,
-  setIsFocused,
+  handleInputFocus,
+  handleInputBlur,
   inputError,
   pasteError,
   setPasteError,
@@ -67,9 +69,6 @@ export default function SearchInput({
     return 'text-[7vw] md:text-[5vw]';
   };
 
-  const handleInputFocus = () => {
-    setIsFocused(true);
-  };
 
   return (
     <div className="w-full flex flex-col items-center gap-12">
@@ -85,9 +84,7 @@ export default function SearchInput({
             type="text"
             value={domainInput}
             onFocus={handleInputFocus}
-            onBlur={() => {
-              // Note: blur handling is managed in EntryPage via handleInputBlur to allow clicks inside history dropdown
-            }}
+            onBlur={handleInputBlur}
             onChange={(e) => {
               setDomainInput(e.target.value.toLowerCase());
               if (pasteError) setPasteError(null);
@@ -130,8 +127,8 @@ export default function SearchInput({
 
           {/* Styled text display */}
           <motion.div
-            animate={inputError ? { x: [-12, 12, -10, 10, -5, 5, 0] } : {}}
-            transition={{ duration: 0.4 }}
+            variants={inputErrorVariants}
+            animate={inputError ? "shake" : ""}
             className={`w-full text-center font-mono font-bold tracking-tight select-none h-[1.2em] flex items-center justify-center ${getDynamicFontSize(
               (highlightedIndex >= 0 && showHistory ? recentQueries[highlightedIndex].domain : domainInput).length
             )}`}

@@ -9,6 +9,7 @@ import Footer from '../components/Footer';
 import InteractiveGrid from '../components/InteractiveGrid';
 import SearchInput from '../components/SearchInput';
 import { getValidationErrors } from '../utils/validation';
+import { pageVariants } from '../constants/animations';
 
 
 
@@ -46,8 +47,32 @@ export default function EntryPage() {
 
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef(null);
+  const blurTimeoutRef = useRef(null);
   const [showHistory, setShowHistory] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  const handleInputFocus = () => {
+    if (blurTimeoutRef.current) {
+      clearTimeout(blurTimeoutRef.current);
+    }
+    setIsFocused(true);
+  };
+
+  const handleInputBlur = () => {
+    blurTimeoutRef.current = setTimeout(() => {
+      setIsFocused(false);
+      setShowHistory(false);
+      setHighlightedIndex(-1);
+    }, 200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const [scrollY, setScrollY] = useState(0);
   const [footerHeight, setFooterHeight] = useState(0);
@@ -168,10 +193,10 @@ export default function EntryPage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0, y: -40 }}
-      transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
       className="relative w-full h-full overflow-hidden text-ink"
     >
       {/* The Scrollable Page Content */}
@@ -220,6 +245,8 @@ export default function EntryPage() {
                   setDomainInput={setDomainInput}
                   isFocused={isFocused}
                   setIsFocused={setIsFocused}
+                  handleInputFocus={handleInputFocus}
+                  handleInputBlur={handleInputBlur}
                   inputError={inputError}
                   pasteError={pasteError}
                   setPasteError={setPasteError}
