@@ -9,17 +9,6 @@
 
 
 
- <h1 align="center">DNS Observatory</h1> 
-
-<p align="center">
-  <b>Interactive DNS resolution visualizer with iterative tracing, packet inspection, and real-time telemetry.</b>
-</p> 
-
-<p align="center">
-  <a href="https://dns-observatory.vercel.app/">
-    <img src="https://img.shields.io/badge/%E2%9A%A1_SEE_IT_IN_ACTION-FF4D00?style=for-the-badge" alt="See it in action" />
-  </a>
-</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Node.js-v22+-0D0D0D?style=for-the-badge&logo=nodedotjs&logoColor=339933" />
@@ -29,13 +18,19 @@
   <img src="https://img.shields.io/badge/Docker-Ready-0D0D0D?style=for-the-badge&logo=docker&logoColor=2496ED" />
 </p>
 
+<p align="center">
+  <a href="https://dns-observatory.vercel.app/">
+    <img src="https://img.shields.io/badge/%E2%9A%A1_SEE_IT_IN_ACTION-FF4D00?style=for-the-badge" alt="See it in action" />
+  </a>
+</p>
+
 <br />
 
 ## What is DNS Observatory?
 
 DNS Observatory traces the **full iterative resolution path** of any domain name from root servers to authoritative nameservers and visualizes every hop with per-server latency, GeoIP metadata, DNSSEC presence flags, and raw wire-format packet bytes.
 
-It includes a from-scratch **custom DNS server** (UDP binary parser/writer, no libraries), a **client-side PCAP exporter** that reconstructs Ethernet/IP/UDP/TCP headers for Wireshark, and a **resolver benchmark** comparing Cloudflare vs Google latency side-by-side (Not much advanced though)
+It includes a **client-side PCAP exporter** that reconstructs Ethernet, IP, and UDP headers for Wireshark analysis, and a **resolver benchmark** comparing Cloudflare and Google query latency side-by-side.
 
 ---
 
@@ -48,17 +43,6 @@ It includes a from-scratch **custom DNS server** (UDP binary parser/writer, no l
 - CNAME chain following with automatic re-resolution (up to 4 levels deep)
 - Configurable resolver selection (Cloudflare `1.1.1.1`, Google `8.8.8.8`, Quad9 `9.9.9.9`, or custom IP)
 - Batch `ALL` type queries resolves A, AAAA, MX, TXT, NS in parallel against the authoritative server
-
-### 📡 Custom DNS Server
-
-- Built from scratch using raw UDP sockets no DNS libraries
-- Binary protocol parser supporting A, AAAA, NS, CNAME, SOA, PTR, MX, TXT, SRV, OPT (EDNS0), DS, RRSIG, DNSKEY record types
-- Domain name compression pointer support with circular reference protection
-- Dynamic subdomain management via HTTP API (persistent and ephemeral TTL records)
-- Wildcard record matching
-- Upstream forwarding to configurable DNS servers with sequential fallback
-- DNS reflection attack protection (drops response packets received on the listening port)
-- Telemetry event emission via EventEmitter for real-time monitoring (not used in dns observatory for now)
 
 ### 🌍 GeoIP Enrichment
 
@@ -148,7 +132,6 @@ flowchart TB
 
     SQ -- "UDP port 53 queries" --> DNS_PUB["Root Servers\nTLD Servers\nAuth Servers"]
 ```
-```
 
 ---
 
@@ -163,7 +146,6 @@ flowchart TB
 | **Compiler** | React Compiler (babel-plugin-react-compiler) |
 | **DevOps** | Docker, Vercel (frontend), Render (backend) |
 | **Code Quality** | ESLint 10, Husky, lint-staged, Commitizen, conventional commits |
-| **Testing** | Jest, Supertest |
 | **API Collection** | Bruno |
 
 ---
@@ -197,7 +179,7 @@ npm run dev
 
 This starts:
 
-- **API + DNS server** at `http://localhost:4000` (UDP DNS on port `5354`)
+- **API server** at `http://localhost:4000`
 - **Vite dev server** at `http://localhost:5173`
 
 ### Individual Services
@@ -208,9 +190,6 @@ npm run start:server
 
 # Vite frontend only
 npm run start:app
-
-# Custom DNS server standalone (separate entry point with HTTP management API)
-npm run start:dns
 ```
 
 ---
@@ -223,7 +202,7 @@ docker compose up
 
 # Or build the image directly
 docker build -t dns-observatory .
-docker run -p 4000:4000 -p 5354:5354/udp dns-observatory
+docker run -p 4000:4000 dns-observatory
 ```
 
 ### Environment Variables
@@ -231,12 +210,8 @@ docker run -p 4000:4000 -p 5354:5354/udp dns-observatory
 | Variable | Default | Description |
 |---|---|---|
 | `API_PORT` | `4000` | Express API server port |
-| `DNS_PORT` | `5354` | Custom DNS UDP server port |
 | `NODE_ENV` | — | Set to `production` to serve static frontend from `app/dist` |
 | `CORS_ORIGINS` | — | Comma-separated allowed origins for CORS |
-| `DNS_FORWARD_ENABLED` | `true` | Enable upstream DNS forwarding for non-local domains |
-| `DNS_UPSTREAM_SERVERS` | `8.8.8.8,8.8.4.4` | Comma-separated upstream DNS servers (supports `host:port` and `[ipv6]:port`) |
-| `DNS_FORWARD_TIMEOUT` | `2000` | Upstream query timeout in milliseconds |
 
 ---
 
@@ -299,7 +274,7 @@ Compares Cloudflare (1.1.1.1) vs Google (8.8.8.8) resolution latency.
 }
 ```
 
-
+---
 
 ## Project Structure
 
@@ -320,8 +295,7 @@ DNS-Observatory/
 │   │   │   ├── RecordTable.jsx     # DNS record table
 │   │   │   └── ...                 # BentoBox, Footer, FlagBadge, etc.
 │   │   ├── stores/
-│   │   │   ├── useTraceStore.js    # Global trace state (Zustand)
-│   │   │   └── usePacketStore.js   # Packet viewer state
+│   │   │   └── useTraceStore.js    # Global trace state (Zustand)
 │   │   └── utils/
 │   │       ├── pcapExporter.js     # Client-side PCAP reconstruction
 │   │       └── dnsFormatter.js     # Record value formatting
@@ -347,7 +321,15 @@ DNS-Observatory/
 
 - **Free-tier hosting**: The backend runs on Render's free tier, which spins down after inactivity. The first request after idle may take 30–60 seconds for cold start.
 - **No recursive caching**: The iterative resolver intentionally bypasses caching to demonstrate the full resolution path every time.
-- **GeoIP accuracy**: The free ip-api.com tier is rate-limited to 45 requests/minute. High-traffic usage may fall back to the a lil bit less precise local MaxMind databases.(city level accuracy may not be visible sometimes with locak MaxMind DB)
+- **GeoIP accuracy**: The free ip-api.com tier is rate-limited to 45 requests/minute. High-traffic usage will fall back to the less precise local MaxMind databases (city-level fallback).
+
+---
+
+## Roadmap
+
+Future planned enhancements for the DNS Observatory platform:
+* **DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT):** Support tracing and parsing encrypted DNS request streams.
+* **DNSSEC Chain of Trust Validator:** Build a strict visual validator confirming cryptographic keys down from the root zone anchors.
 
 ---
 

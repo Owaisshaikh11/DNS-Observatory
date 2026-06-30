@@ -22,9 +22,8 @@
 const dgram = require('dgram');
 const net = require('net');
 const logger = require('./logger');
-const { buildDnsQuery } = require('./dns-query-writer');
-const { parseDnsResponse } = require('./dns-response-parser');
-const { parseQuery, createResponse } = require('./lib/dns-parser');
+const { buildDnsQuery } = require('./lib/dns-writer');
+const { parseDnsResponse, parseQuery, createResponse } = require('./lib/dns-parser');
 const { lookupGeoIp } = require('./geoip-service');
 const ROOT_SERVERS = require('./root-hints');
 

@@ -663,33 +663,9 @@ function createResponse(query, answers = [], rcode = 0) {
   return buffer.slice(0, offset);
 }
 
-/**
- * Creates a minimalist error DNS response header.
- *
- * @param {number} id - Transaction ID
- * @param {number} rcode - The error response code (e.g. 1 for FORMERR)
- * @returns {Buffer} Raw response buffer
- */
-function createErrorResponse(id, rcode) {
-  const buffer = Buffer.alloc(12);
-  buffer.writeUInt16BE(id, 0);
-  
-  // flags: Response (QR = 1), Authoritative Answer (AA = 1), RCODE = rcode
-  const flags = 0x8000 | 0x0400 | (rcode & 0x0f);
-  buffer.writeUInt16BE(flags, 2);
-  
-  buffer.writeUInt16BE(0, 4); // QDCount
-  buffer.writeUInt16BE(0, 6); // ANCount
-  buffer.writeUInt16BE(0, 8); // NSCount
-  buffer.writeUInt16BE(0, 10); // ARCount
-  
-  return buffer;
-}
-
 module.exports = {
   parseDomainName,
   parseQuery,
   createResponse,
-  createErrorResponse,
   parseDnsResponse,
 };

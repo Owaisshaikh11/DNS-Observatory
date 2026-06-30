@@ -305,7 +305,7 @@ export function downloadBlob(bytes, filename) {
 }
 
 // Generates standard TCP connection packets: SYN, SYN-ACK, ACK, Query, Response, FIN-ACK, ACK
-export function buildTcpFlowPackets({
+function buildTcpFlowPackets({
   queryBytes,
   responseBytes,
   serverIpStr,
@@ -473,7 +473,7 @@ export function buildTcpFlowPackets({
 }
 
 // Maps a single hop attempt object to PCAP packets (UDP or TCP)
-export function processAttempt({
+function processAttempt({
   attempt,
   serverIpStr,
   serverPort = 53,
@@ -528,6 +528,72 @@ export function processAttempt({
   }
 }
 
+// Helper to parse parallel queries and add request/response packets
+function processParallelQueries({ parallelQueries, baseMs, serverIpStr, serverPort, clientPort, cumulativeMs, packets }) {
+  parallelQueries.forEach((q, qIdx) => {
+    const subClientPort = clientPort + qIdx;
+    
+    // Request Packet
+    if (q.queryPacket?.rawHex) {
+      const queryBytes = hexToBytes(q.queryPacket.rawHex);
+      const queryTime = baseMs + (cumulativeMs || 0) - (q.latencyMs || 0);
+      packets.push(buildEthernetPacket({
+        dnsBytes: queryBytes,
+        isRequest: true,
+        serverIpStr,
+        serverPort,
+        clientPort: subClientPort,
+        timestampMs: queryTime
+      }));
+    }
+
+    // Response Packet
+    if (q.responsePacket?.rawHex && q.rcode !== 'TIMEOUT') {
+      const responseBytes = hexToBytes(q.responsePacket.rawHex);
+      const responseTime = baseMs + (cumulativeMs || 0);
+      packets.push(buildEthernetPacket({
+        dnsBytes: responseBytes,
+        isRequest: false,
+        serverIpStr,
+        serverPort,
+        clientPort: subClientPort,
+        timestampMs: responseTime
+      }));
+    }
+  });
+}
+
+// Helper to parse single queries and add request/response packets
+function processSingleQuery({ hop, baseMs, serverIpStr, serverPort, clientPort, packets }) {
+  // Request Packet
+  if (hop.queryPacket?.rawHex) {
+    const queryBytes = hexToBytes(hop.queryPacket.rawHex);
+    const queryTime = baseMs + (hop.cumulativeMs || 0) - (hop.latencyMs || 0);
+    packets.push(buildEthernetPacket({
+      dnsBytes: queryBytes,
+      isRequest: true,
+      serverIpStr,
+      serverPort,
+      clientPort,
+      timestampMs: queryTime
+    }));
+  }
+
+  // Response Packet
+  if (hop.response?.rawHex && hop.response?.rcode !== 'TIMEOUT') {
+    const responseBytes = hexToBytes(hop.response.rawHex);
+    const responseTime = baseMs + (hop.cumulativeMs || 0);
+    packets.push(buildEthernetPacket({
+      dnsBytes: responseBytes,
+      isRequest: false,
+      serverIpStr,
+      serverPort,
+      clientPort,
+      timestampMs: responseTime
+    }));
+  }
+}
+
 // Main function to export a single hop query/response packets
 export function exportHopPcap(hop, traceTimestamp) {
   const baseMs = new Date(traceTimestamp || Date.now()).getTime();
@@ -550,66 +616,24 @@ export function exportHopPcap(hop, traceTimestamp) {
       offsetMs += (att.latencyMs || 0) + 100; // Increment time sequentially
     });
   } else if (hop.parallelQueries && hop.parallelQueries.length > 0) {
-    hop.parallelQueries.forEach((q, qIdx) => {
-      const subClientPort = clientPort + qIdx;
-      
-      // Request Packet
-      if (q.queryPacket?.rawHex) {
-        const queryBytes = hexToBytes(q.queryPacket.rawHex);
-        const queryTime = baseMs + (hop.cumulativeMs || 0) - (q.latencyMs || 0);
-        packets.push(buildEthernetPacket({
-          dnsBytes: queryBytes,
-          isRequest: true,
-          serverIpStr: hop.ip,
-          serverPort: hop.port || 53,
-          clientPort: subClientPort,
-          timestampMs: queryTime
-        }));
-      }
-
-      // Response Packet
-      if (q.responsePacket?.rawHex && q.rcode !== 'TIMEOUT') {
-        const responseBytes = hexToBytes(q.responsePacket.rawHex);
-        const responseTime = baseMs + (hop.cumulativeMs || 0);
-        packets.push(buildEthernetPacket({
-          dnsBytes: responseBytes,
-          isRequest: false,
-          serverIpStr: hop.ip,
-          serverPort: hop.port || 53,
-          clientPort: subClientPort,
-          timestampMs: responseTime
-        }));
-      }
+    processParallelQueries({
+      parallelQueries: hop.parallelQueries,
+      baseMs,
+      serverIpStr: hop.ip,
+      serverPort: hop.port || 53,
+      clientPort,
+      cumulativeMs: hop.cumulativeMs,
+      packets
     });
   } else {
-    // Single Query Hop (legacy/fallback)
-    // Request Packet
-    if (hop.queryPacket?.rawHex) {
-      const queryBytes = hexToBytes(hop.queryPacket.rawHex);
-      const queryTime = baseMs + (hop.cumulativeMs || 0) - (hop.latencyMs || 0);
-      packets.push(buildEthernetPacket({
-        dnsBytes: queryBytes,
-        isRequest: true,
-        serverIpStr: hop.ip,
-        serverPort: hop.port || 53,
-        clientPort: clientPort,
-        timestampMs: queryTime
-      }));
-    }
-
-    // Response Packet
-    if (hop.response?.rawHex && hop.response?.rcode !== 'TIMEOUT') {
-      const responseBytes = hexToBytes(hop.response.rawHex);
-      const responseTime = baseMs + (hop.cumulativeMs || 0);
-      packets.push(buildEthernetPacket({
-        dnsBytes: responseBytes,
-        isRequest: false,
-        serverIpStr: hop.ip,
-        serverPort: hop.port || 53,
-        clientPort: clientPort,
-        timestampMs: responseTime
-      }));
-    }
+    processSingleQuery({
+      hop,
+      baseMs,
+      serverIpStr: hop.ip,
+      serverPort: hop.port || 53,
+      clientPort,
+      packets
+    });
   }
 
   if (packets.length === 0) return false;
@@ -652,67 +676,25 @@ export function exportTracePcap(hops, traceTimestamp, domain = 'dns-trace') {
       });
       clientPortOffset += hop.attempts.length * 10;
     } else if (hop.parallelQueries && hop.parallelQueries.length > 0) {
-      hop.parallelQueries.forEach((q, qIdx) => {
-        const subClientPort = baseHopClientPort + qIdx;
-        
-        // Request Packet
-        if (q.queryPacket?.rawHex) {
-          const queryBytes = hexToBytes(q.queryPacket.rawHex);
-          const queryTime = baseMs + (hop.cumulativeMs || 0) - (q.latencyMs || 0);
-          packets.push(buildEthernetPacket({
-            dnsBytes: queryBytes,
-            isRequest: true,
-            serverIpStr: hop.ip,
-            serverPort: hop.port || 53,
-            clientPort: subClientPort,
-            timestampMs: queryTime
-          }));
-        }
-
-        // Response Packet
-        if (q.responsePacket?.rawHex && q.rcode !== 'TIMEOUT') {
-          const responseBytes = hexToBytes(q.responsePacket.rawHex);
-          const responseTime = baseMs + (hop.cumulativeMs || 0);
-          packets.push(buildEthernetPacket({
-            dnsBytes: responseBytes,
-            isRequest: false,
-            serverIpStr: hop.ip,
-            serverPort: hop.port || 53,
-            clientPort: subClientPort,
-            timestampMs: responseTime
-          }));
-        }
+      processParallelQueries({
+        parallelQueries: hop.parallelQueries,
+        baseMs,
+        serverIpStr: hop.ip,
+        serverPort: hop.port || 53,
+        clientPort: baseHopClientPort,
+        cumulativeMs: hop.cumulativeMs,
+        packets
       });
       clientPortOffset += hop.parallelQueries.length;
     } else {
-      // Single Query Hop (legacy/fallback)
-      // Request Packet
-      if (hop.queryPacket?.rawHex) {
-        const queryBytes = hexToBytes(hop.queryPacket.rawHex);
-        const queryTime = baseMs + (hop.cumulativeMs || 0) - (hop.latencyMs || 0);
-        packets.push(buildEthernetPacket({
-          dnsBytes: queryBytes,
-          isRequest: true,
-          serverIpStr: hop.ip,
-          serverPort: hop.port || 53,
-          clientPort: baseHopClientPort,
-          timestampMs: queryTime
-        }));
-      }
-
-      // Response Packet
-      if (hop.response?.rawHex && hop.response?.rcode !== 'TIMEOUT') {
-        const responseBytes = hexToBytes(hop.response.rawHex);
-        const responseTime = baseMs + (hop.cumulativeMs || 0);
-        packets.push(buildEthernetPacket({
-          dnsBytes: responseBytes,
-          isRequest: false,
-          serverIpStr: hop.ip,
-          serverPort: hop.port || 53,
-          clientPort: baseHopClientPort,
-          timestampMs: responseTime
-        }));
-      }
+      processSingleQuery({
+        hop,
+        baseMs,
+        serverIpStr: hop.ip,
+        serverPort: hop.port || 53,
+        clientPort: baseHopClientPort,
+        packets
+      });
       clientPortOffset += 1;
     }
   }

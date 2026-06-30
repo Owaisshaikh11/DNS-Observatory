@@ -1,90 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Info, Database } from 'lucide-react';
+import { Info } from 'lucide-react';
 import { useTraceStore } from '../stores/useTraceStore';
 import CompactTree from '../components/CompactTree';
 import HopCard from '../components/HopCard';
 import HopInspector from '../components/HopInspector';
 import InteractiveGrid from '../components/InteractiveGrid';
 import CacheDrawer from '../components/CacheDrawer';
-import { formatRecordValue } from '../utils/dnsFormatter';
-
-const getHopsLogs = (hopsArray, activeStepIndex, domVal, recTypeVal) => {
-  const logLines = [];
-  if (!hopsArray || hopsArray.length === 0) return logLines;
-
-  // Filter hops that are reached based on activeStepIndex
-  const activeHops = hopsArray.filter(hop => {
-    if (hop.type === 'CLIENT' || hop.type === 'LOCAL') {
-      return activeStepIndex >= 1;
-    }
-    return hop.step !== undefined && hop.step <= activeStepIndex;
-  });
-
-  for (let i = 0; i < activeHops.length; i++) {
-    const hop = activeHops[i];
-    const timeStr = `[${(hop.cumulativeMs / 1000).toFixed(3)}s]`;
-    const hopDomain = hop.queryDomain || domVal;
-
-    if (hop.type === 'CLIENT') {
-      logLines.push({ time: timeStr, source: 'CLIENT', text: `Initiating trace query for "${hopDomain.toUpperCase()}" (Record Type: ${recTypeVal})` });
-      if (recTypeVal === 'ALL') {
-        logLines.push({ time: timeStr, source: 'RFC-8482', text: `Notice: ANY query deprecated by RFC 8482. Resolving types A, AAAA, MX, TXT, NS in parallel.` });
-      }
-      const hasNextLocal = activeHops.some(h => h.type === 'LOCAL');
-      if (hasNextLocal) {
-        const nextHop = hopsArray.find(h => h.type === 'LOCAL');
-        const isCacheHit = nextHop && nextHop.label && nextHop.label.includes('Cache Hit');
-        if (isCacheHit) {
-          logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending query to Recursive Resolver at ${nextHop.ip || '1.1.1.1'}` });
-        } else {
-          logLines.push({ time: timeStr, source: 'CLIENT', text: `Sending UDP query packet payload to Recursive Resolver` });
-        }
-      }
-    } else if (hop.type === 'LOCAL') {
-      const isCacheHit = hop.label && hop.label.includes('Cache Hit');
-      if (isCacheHit) {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Received request packet. Checking virtual caching resolver...` });
-        if (hop.response && hop.response.rcode === 'NXDOMAIN') {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Negative Cache Hit! Target domain does not exist (NXDOMAIN cached).` });
-        } else {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Cache Hit! Virtual caching resolver returned active record set from memory.` });
-        }
-        const answersList = hop.response?.answers || [];
-        logLines.push({ time: timeStr, source: 'CLIENT', text: `Received response payload: ${answersList.length} records resolved. Iterative sequence completed.` });
-      } else {
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `Query received by Recursive Resolver (${hop.ip}).` });
-        logLines.push({ time: timeStr, source: 'LOCAL', text: `No active cache record found. Forwarding query to Root Authority hints...` });
-      }
-    } else if (hop.type === 'ROOT') {
-      logLines.push({ time: timeStr, source: 'ROOT', text: `Querying Root Authority: ${hop.label} (${hop.ip})` });
-      logLines.push({ time: timeStr, source: 'ROOT', text: `Received delegation referral (RCODE: ${hop.response?.rcode || 'NOERROR'}). Found ${hop.response?.authority?.length || 13} TLD servers.` });
-    } else if (hop.type === 'TLD') {
-      logLines.push({ time: timeStr, source: 'TLD', text: `Querying TLD Server: ${hop.label} (${hop.ip})` });
-      logLines.push({ time: timeStr, source: 'TLD', text: `Received delegation referral (RCODE: ${hop.response?.rcode || 'NOERROR'}). Found ${hop.response?.authority?.length || 4} authoritative servers.` });
-    } else if (hop.type === 'AUTH') {
-      logLines.push({ time: timeStr, source: 'AUTH', text: `Querying Authoritative Server: ${(hop.queryDomain || '').toUpperCase()} (${hop.ip})` });
-      const rcode = hop.response?.rcode || 'NOERROR';
-      const answersCount = hop.response?.answers?.length || 0;
-      if (rcode === 'NXDOMAIN') {
-        logLines.push({ time: timeStr, source: 'AUTH', text: `NXDOMAIN response code returned. Requested domain target does not exist!` });
-      } else {
-        logLines.push({ time: timeStr, source: 'AUTH', text: `Final answer received (RCODE: ${rcode}, AA Flag: ${hop.response?.flags?.includes('AA') ? '1' : '0'}). Found ${answersCount} answers.` });
-        
-        const isFinalStepReached = activeStepIndex >= hop.step + 2;
-        if (isFinalStepReached) {
-          logLines.push({ time: timeStr, source: 'LOCAL', text: `Iterative sequence completed. Retransmitting payload to Stub Resolver.` });
-        }
-      }
-    } else if (hop.type === 'CNAME_REDIRECT') {
-      logLines.push({ time: timeStr, source: 'CNAME', text: `CNAME alias redirection: "${hop.cnameFrom.toUpperCase()}" -> "${hop.cnameTo.toUpperCase()}"` });
-      logLines.push({ time: timeStr, source: 'CLIENT', text: `Redirecting resolver chain to target host.` });
-    }
-  }
-
-  return logLines;
-};
+import ConsoleLogger from '../components/ConsoleLogger';
+import VisualizerControls from '../components/VisualizerControls';
+import CnameChain from '../components/CnameChain';
+import RecordSection from '../components/RecordSection';
+import usePlaybackEngine from '../hooks/usePlaybackEngine';
 
 export default function VisualizerPage() {
   const navigate = useNavigate();
@@ -112,16 +40,11 @@ export default function VisualizerPage() {
     toggleSlowMo,
     resolver,
     cancelPendingRequests,
-    completedAt,
   } = useTraceStore();
 
-  const [secondsElapsed, setSecondsElapsed] = useState(0);
-  const [expandedGroups, setExpandedGroups] = useState({});
-  const [showRawJson, setShowRawJson] = useState({});
   const [showLabNotes, setShowLabNotes] = useState(false);
   const [isCacheOpen, setIsCacheOpen] = useState(false);
   const [showNudge, setShowNudge] = useState(false);
-  const consoleEndRef = useRef(null);
 
   const handleToggleCacheDrawer = () => {
     setIsCacheOpen((prev) => !prev);
@@ -166,14 +89,6 @@ export default function VisualizerPage() {
     };
   }, [isDragging]);
 
-  const toggleGroup = (section, type) => {
-    const key = `${section}-${type}`;
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
-
   // Retrace on reload if query parameters are present but traceData is empty
   useEffect(() => {
     if (qParam && (!traceData || domain !== qParam)) {
@@ -193,63 +108,15 @@ export default function VisualizerPage() {
   const totalLatency = traceData?.totalLatency || 0;
   const cnameChain = traceData?.cnameChain || [];
 
-  const logLines = getHopsLogs(hops, activeStep, domain || qParam || '', recordType || typeParam || 'ALL');
-
-  useEffect(() => {
-    if (consoleEndRef.current) {
-      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [logLines.length]);
-
-  // Playback timer loop
-  useEffect(() => {
-    if (playbackState !== 'PLAYING' || !traceData || edges.length === 0) return;
-
-    if (activeStep >= edges.length) {
-      const finalStatus = traceData.status || 'COMPLETE';
-      useTraceStore.setState({
-        playbackState: finalStatus === 'NOERROR' ? 'COMPLETE' : finalStatus,
-        completedAt: Date.now()
-      });
-      return;
-    }
-
-    const delay = isSlowMo ? 1800 : 900;
-    const timer = setTimeout(() => {
-      setActiveStep(activeStep + 1);
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [playbackState, activeStep, isSlowMo, traceData, edges.length, setActiveStep]);
-
-  // Real-time TTL Countdown timer (ticks up seconds elapsed since completion)
-  useEffect(() => {
-    let active = true;
-
-    if (!completedAt) {
-      const timer = setTimeout(() => {
-        if (active) setSecondsElapsed(0);
-      }, 0);
-      return () => {
-        active = false;
-        clearTimeout(timer);
-      };
-    }
-
-    const initTimer = setTimeout(() => {
-      if (active) setSecondsElapsed(Math.floor((Date.now() - completedAt) / 1000));
-    }, 0);
-
-    const interval = setInterval(() => {
-      if (active) setSecondsElapsed(Math.floor((Date.now() - completedAt) / 1000));
-    }, 1000);
-
-    return () => {
-      active = false;
-      clearTimeout(initTimer);
-      clearInterval(interval);
-    };
-  }, [completedAt]);
+  // Playback timer loop runs via custom playback hook
+  usePlaybackEngine({
+    playbackState,
+    activeStep,
+    setActiveStep,
+    isSlowMo,
+    traceData,
+    edgesLength: edges.length
+  });
 
   // Show Coach-Mark nudge tooltip once the first trace completes in this session
   useEffect(() => {
@@ -286,7 +153,6 @@ export default function VisualizerPage() {
   }, [activeStep, edges.length, setActiveStep]);
 
   const handleReplay = useCallback(() => {
-    setSecondsElapsed(0);
     replayTrace();
   }, [replayTrace]);
 
@@ -355,7 +221,6 @@ export default function VisualizerPage() {
     setShowNudge(false);
     useTraceStore.setState({ recordType: type });
     useTraceStore.getState().startTrace(domain, type);
-    setSecondsElapsed(0);
     navigate(`/trace?q=${domain}&type=${type}&benchmark=${isBenchmarkMode}&resolver=${encodeURIComponent(resolver)}`);
   };
 
@@ -537,125 +402,7 @@ export default function VisualizerPage() {
     );
   };
 
-  const renderRecordCard = (rec, ri, type) => {
-    const currentTtl = Math.max(0, rec.ttl - secondsElapsed);
-    const isExpired = currentTtl === 0 && !isNxDomain;
-    const cardKey = `${type}-${rec.name || ''}-${ri}`;
-    const showJson = showRawJson[cardKey] === true;
 
-    return (
-      <div
-        key={ri}
-        className={`border border-ink flex flex-col relative overflow-hidden transition-all duration-300 bg-white ${isExpired ? 'border-ink/20 opacity-45' : ''
-          }`}
-      >
-        {/* Cache Expiry stamp overlay */}
-        {isExpired && (
-          <div className="absolute inset-0 flex items-center justify-center z-20 backdrop-blur-[1px] bg-base/40 select-none">
-            <span className="text-error font-mono text-[9px] font-bold border border-error bg-[#F0EDE8] px-2 py-0.5 rotate-[-5deg] tracking-widest shadow-[2px_2px_0_0_rgba(239,68,68,1)]">
-              [CACHE EXPIRED]
-            </span>
-          </div>
-        )}
-
-        {/* Record metadata header */}
-        {((rec.ttl !== undefined && rec.ttl !== null) || (rec.name && rec.name.replace(/\.$/, '') !== domain.replace(/\.$/, '')) || typeof rec.value === 'object') && (
-          <div className="px-3 py-1 bg-ink/[0.02] border-b border-ink/10 flex justify-between items-center text-[8.5px] text-ink/50 select-none font-mono font-medium">
-            <div className="flex items-center gap-1.5">
-              <span>{rec.ttl !== undefined ? `TTL ${currentTtl}s` : ''}</span>
-              {typeof rec.value === 'object' && (
-                <button
-                  type="button"
-                  onClick={() => setShowRawJson(prev => ({ ...prev, [cardKey]: !prev[cardKey] }))}
-                  className="px-1 border border-ink/20 hover:border-ink hover:text-accent transition-colors cursor-pointer text-[7.5px] uppercase font-bold"
-                >
-                  {showJson ? 'TEXT' : 'JSON'}
-                </button>
-              )}
-            </div>
-            {rec.name && rec.name.replace(/\.$/, '') !== domain.replace(/\.$/, '') && (
-              <span className="truncate max-w-[160px]" title={rec.name}>
-                {rec.name}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Record value */}
-        <div className="px-3 py-1.5 font-mono text-[10.5px] break-all leading-relaxed text-ink/80 select-all font-medium">
-          {showJson ? JSON.stringify(rec.value) : formatRecordValue(rec.value, type)}
-        </div>
-      </div>
-    );
-  };
-
-  const renderGroupedSection = (sectionName, records) => {
-    if (!records || records.length === 0) {
-      return <div className="font-mono text-[10px] text-ink opacity-40 italic">No records found.</div>;
-    }
-
-    const groups = {};
-    records.forEach((rec) => {
-      const type = rec.typeName || rec.type || 'UNKNOWN';
-      if (!groups[type]) {
-        groups[type] = [];
-      }
-      groups[type].push(rec);
-    });
-
-    return (
-      <div className="flex flex-col gap-4">
-        {Object.entries(groups).map(([type, groupRecords]) => {
-          const key = `${sectionName}-${type}`;
-          const isExpanded = expandedGroups[key] === true; // default to false
-          const firstRecord = groupRecords[0];
-          const remainingRecords = groupRecords.slice(1);
-
-          return (
-            <div key={type} className="flex flex-col gap-2">
-              {/* Type Category Title */}
-              <div className="font-mono text-[9.5px] font-bold uppercase text-ink/60 tracking-wider flex items-center gap-1.5 select-none">
-                <span>:: {type} records</span>
-                <span className="text-[8px] opacity-40">({groupRecords.length})</span>
-              </div>
-
-              {/* Always show the first record */}
-              {renderRecordCard(firstRecord, 0, type)}
-
-              {/* Remaining records shown under collapsible accordion container */}
-              {remainingRecords.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <AnimatePresence initial={false}>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                        className="overflow-hidden flex flex-col gap-2"
-                      >
-                        {remainingRecords.map((rec, ri) => renderRecordCard(rec, ri + 1, type))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Expand / Collapse trigger button */}
-                  <button
-                    onClick={() => toggleGroup(sectionName, type)}
-                    className="w-full py-1.5 border border-dashed border-ink/30 bg-ink/[0.01] hover:bg-ink hover:text-base hover:border-ink font-mono text-[8.5px] font-bold uppercase tracking-widest text-center cursor-pointer transition-all duration-100 hover:-translate-y-[0.5px] hover:shadow-[1.5px_1.5px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none"
-                  >
-                    {isExpanded
-                      ? `[-] COLLAPSE ${remainingRecords.length} RECORDS`
-                      : `[+] EXPAND +${remainingRecords.length} MORE RECORDS`}
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
 
   return (
     <div className="w-full h-full flex flex-col text-ink bg-base overflow-hidden selection:bg-accent selection:text-[var(--base)] relative z-10">
@@ -677,97 +424,21 @@ export default function VisualizerPage() {
         </div>
 
         <div className="flex items-center gap-6">
-          {/* Playback control buttons styled exactly like prototype */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handlePrev}
-              disabled={activeStep === 0}
-              className="px-2 py-0.5 border border-ink/20 bg-base text-ink font-bold hover:border-ink hover:text-accent hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0d0d0d] active:translate-y-0 active:shadow-none transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
-            >
-              ◀ PREV
-            </button>
-            <button
-              onClick={togglePlayback}
-              className={`px-3 py-0.5 border font-bold transition-all duration-150 cursor-pointer hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0d0d0d] active:translate-y-0 active:shadow-none ${playbackState === 'PLAYING'
-                ? 'bg-accent border-accent text-base'
-                : 'bg-base border-ink/20 hover:border-ink hover:text-accent'
-                }`}
-            >
-              {playbackState === 'PLAYING' ? '⏸ PAUSE' : '⏵ PLAY'}
-            </button>
-            <button
-              onClick={handleNext}
-              disabled={activeStep === edges.length}
-              className="px-2 py-0.5 border border-ink/20 bg-base text-ink font-bold hover:border-ink hover:text-accent hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0d0d0d] active:translate-y-0 active:shadow-none transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
-            >
-              NEXT ▶
-            </button>
-          </div>
-
-          <button
-            onClick={toggleSlowMo}
-            className={`px-2 py-0.5 border bg-base transition-all duration-150 cursor-pointer hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none ${isSlowMo ? 'border-accent text-accent' : 'border-ink/20 hover:border-ink'
-              }`}
-          >
-            SLOW-MO
-          </button>
-
-          <button
-            onClick={handleReplay}
-            className="flex items-center gap-1.5 px-3 py-0.5 border border-ink/20 bg-base hover:border-ink hover:text-accent hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-150 cursor-pointer"
-          >
-            ↻ REPLAY
-          </button>
-
-          <button
-            onClick={() => navigate(`/packet-viewer?q=${domain}&type=${recordType}`)}
-            className="px-3 py-0.5 border border-accent bg-base text-accent font-bold hover:bg-accent hover:text-[var(--base)] hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-150 cursor-pointer"
-          >
-            INSPECT PACKETS
-          </button>
-
-          <div className="relative">
-            <button
-              onClick={handleToggleCacheDrawer}
-              className={`flex items-center gap-1.5 px-3 py-0.5 border font-bold hover:-translate-y-[1px] hover:shadow-[2px_2px_0_0_#0D0D0D] active:translate-y-0 active:shadow-none transition-all duration-150 cursor-pointer ${
-                isCacheOpen
-                  ? 'bg-accent border-accent text-base font-black shadow-[2px_2px_0_0_#0D0D0D]'
-                  : 'border-ink/20 hover:border-ink hover:text-accent bg-base text-ink'
-              }`}
-            >
-              <Database className="w-3.5 h-3.5" />
-              RESOLVER CACHE
-            </button>
-
-            {/* Coach-Mark Tooltip (The Nudge) */}
-            <AnimatePresence>
-              {showNudge && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                  className="absolute right-0 top-full mt-2.5 w-72 border border-ink bg-base/95 backdrop-blur-md text-ink p-3.5 shadow-[3px_3px_0_0_var(--color-accent)] font-mono text-[9.5px] leading-relaxed z-50 flex flex-col gap-1.5 text-left"
-                >
-                  <div className="flex justify-between items-center border-b border-ink/10 pb-1 mb-1 font-display font-black text-[10px] uppercase tracking-wide text-accent">
-                    <span>Cache Ready!</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowNudge(false);
-                        sessionStorage.setItem('dns_cache_nudge_shown', 'true');
-                      }}
-                      className="text-ink/40 hover:text-ink cursor-pointer font-sans text-xs font-bold leading-none"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <p className="font-sans font-medium text-[9.5px] text-ink/80">
-                    Record cached! Open the Cache Panel to toggle Cache Mode and test speed differences.
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+        <VisualizerControls
+          activeStep={activeStep}
+          edgesLength={edges.length}
+          playbackState={playbackState}
+          isSlowMo={isSlowMo}
+          isCacheOpen={isCacheOpen}
+          showNudge={showNudge}
+          handlePrev={handlePrev}
+          handleNext={handleNext}
+          togglePlayback={togglePlayback}
+          toggleSlowMo={toggleSlowMo}
+          handleReplay={handleReplay}
+          handleToggleCacheDrawer={handleToggleCacheDrawer}
+          onInspectPackets={() => navigate(`/packet-viewer?q=${domain}&type=${recordType}`)}
+        />
 
           {/* Core Uplink Status */}
           <div className="flex items-center gap-2 w-20 justify-end select-none">
@@ -785,38 +456,13 @@ export default function VisualizerPage() {
 
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
             {/* CNAME Chain Explorer */}
-            <div>
-              <span className="font-mono text-[9px] uppercase opacity-45 block mb-2.5 tracking-wider select-none font-bold">
-                CNAME Chain Explorer
-              </span>
-              <div className="font-mono text-xs flex flex-col gap-1.5 select-text">
-                <div className="flex items-center gap-2 font-bold text-ink">
-                  <span className="text-ink/40">■</span>
-                  <span>{domain}</span>
-                </div>
-                {playbackState === 'COMPLETE' && !isNxDomain && (
-                  <div className="flex flex-col gap-1 relative pl-2.5 ml-1">
-                    <div className="absolute top-0 bottom-1 left-0 w-[1px] bg-ink/20" />
-                    {cnameChain.map((cn, ci) => (
-                      <div key={ci} className="text-ink/75 pl-3.5 truncate text-[11px] leading-relaxed">
-                        ↳ CNAME alias: {cn.to.replace(/\.$/, '')}
-                      </div>
-                    ))}
-                    <div className="text-accent font-bold pl-3.5 text-[11px] leading-relaxed">
-                      ↳ {recordType} Resolved
-                    </div>
-                  </div>
-                )}
-                {isNxDomain && (
-                  <div className="flex flex-col gap-1 relative pl-2.5 ml-1">
-                    <div className="absolute top-0 bottom-1 left-0 w-[1px] bg-ink/20" />
-                    <div className="text-ink/65 font-bold pl-3.5 text-[11px] leading-relaxed">
-                      ↳ NXDOMAIN (Break)
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <CnameChain
+              domain={domain}
+              playbackState={playbackState}
+              isNxDomain={isNxDomain}
+              cnameChain={cnameChain}
+              recordType={recordType}
+            />
 
             {/* Section separator */}
             <div className="h-[1px] bg-ink/10 my-0.5 select-none" />
@@ -828,74 +474,15 @@ export default function VisualizerPage() {
               </span>
 
               {playbackState === 'COMPLETE' || isNxDomain ? (
-                <div className="flex flex-col gap-5">
-                  {recordType === 'ALL' && (
-                    <div className="border border-ink p-3 bg-white font-mono text-[9.5px] relative overflow-hidden shadow-[2px_2px_0_0_#0D0D0D] border-l-4 border-l-accent">
-                      <div className="flex justify-between items-center border-b border-ink/10 pb-1 mb-1.5 font-bold text-accent select-none">
-                        <span>SYNTHETIC BATCH INFO</span>
-                        <a
-                          href="https://blog.cloudflare.com/rfc8482-saying-goodbye-to-any/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline flex items-center gap-0.5 cursor-pointer hover:text-ink transition-colors"
-                        >
-                          RFC 8482 ↗
-                        </a>
-                      </div>
-                      <p className="text-ink/75 leading-relaxed">
-                        In standard DNS, querying for "all" records at once (ANY type) is blocked to prevent DDoS attacks.
-                        To build this list, DNS Observatory automatically resolved A, AAAA, MX, TXT, and NS records in parallel.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* ANSWER SECTION */}
-                  <div className="flex flex-col gap-2.5">
-                    <div className="font-mono text-[9px] uppercase text-ink/40 tracking-wider font-bold select-none">
-                      :: Answer Section
-                    </div>
-                    {renderGroupedSection('answer', answers)}
-                  </div>
-
-                  {/* AUTHORITY SECTION */}
-                  <div className="flex flex-col gap-2">
-                    <div className="font-mono text-[9px] uppercase text-ink/40 tracking-wider font-bold select-none">
-                      :: Authority Section
-                    </div>
-                    {renderGroupedSection('authority', authorityRecords)}
-                  </div>
-
-                  {/* ADDITIONAL SECTION */}
-                  <div className="flex flex-col gap-2">
-                    <div className="font-mono text-[9px] uppercase text-ink/40 tracking-wider font-bold select-none">
-                      :: Additional Section
-                    </div>
-                    {renderGroupedSection('additional', additionalRecords)}
-                  </div>
-
-                  {/* Alternate Query Buttons (Quick Tracing) */}
-                  {!isNxDomain && (
-                    <div className="mt-2 pt-4 border-t border-ink/15 flex flex-col gap-2.5">
-                      <span className="font-mono text-[9px] uppercase text-accent font-bold tracking-wider select-none">
-                        Query Alternate Type
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        {['A', 'AAAA', 'MX', 'TXT', 'CNAME', 'PTR', 'SRV', 'ALL']
-                          .filter((t) => t !== recordType)
-                          .map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => handleAppendQuery(t)}
-                              className="px-3 py-1.5 border border-ink bg-ink/5 font-mono text-[10px] font-bold text-ink hover:bg-ink hover:text-base transition-colors duration-100 cursor-pointer"
-                            >
-                              {t === 'ALL' ? 'BATCH ALL' : `+ ${t}`}
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-
-                </div>
+                <RecordSection
+                  domain={domain}
+                  recordType={recordType}
+                  answers={answers}
+                  authorityRecords={authorityRecords}
+                  additionalRecords={additionalRecords}
+                  isNxDomain={isNxDomain}
+                  onAppendQuery={handleAppendQuery}
+                />
               ) : (
                 <div className="font-mono text-[9.5px] opacity-30 uppercase animate-pulse select-none">
                   Awaiting resolution data...
@@ -1028,22 +615,16 @@ export default function VisualizerPage() {
               <div className={`grid grid-cols-1 ${isBenchmarkMode && (playbackState === 'COMPLETE' || isNxDomain) && benchmarkData ? 'md:grid-cols-5' : ''} gap-3`}>
 
                 {/* Monospace Scrolling Console */}
-                <div className={`flex flex-col bg-ink p-3 font-mono text-[9.1px] text-[#A6E22E] border border-ink overflow-hidden h-36 select-text ${isBenchmarkMode && (playbackState === 'COMPLETE' || isNxDomain) && benchmarkData ? 'md:col-span-3' : 'w-full'}`}>
-                  <div className="text-[8px] text-accent font-bold uppercase tracking-wider mb-1 select-none border-b border-base/10 pb-1 flex justify-between shrink-0">
-                    <span>Observatory Logs</span>
-                    <span className="animate-pulse">CONNECTED</span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto flex flex-col gap-1 select-text scrollbar-thin">
-                    {logLines.map((line, idx) => (
-                      <div key={idx} className="flex gap-2 items-start leading-normal">
-                        <span className="text-[#66D9EF] select-none shrink-0">{line.time}</span>
-                        <span className="text-[#F92672] select-none font-bold shrink-0">[{line.source}]</span>
-                        <span className="text-base select-text break-all text-[#F0EDE8]">{line.text}</span>
-                      </div>
-                    ))}
-                    <div ref={consoleEndRef} />
-                  </div>
-                </div>
+                <ConsoleLogger
+                  hops={hops}
+                  activeStep={activeStep}
+                  domain={domain || qParam || ''}
+                  recordType={recordType || typeParam || 'ALL'}
+                  isBenchmarkMode={isBenchmarkMode}
+                  playbackState={playbackState}
+                  isNxDomain={isNxDomain}
+                  benchmarkData={benchmarkData}
+                />
 
                 {/* Benchmark comparison side panel */}
                 {isBenchmarkMode && (playbackState === 'COMPLETE' || isNxDomain) && (
@@ -1228,7 +809,6 @@ export default function VisualizerPage() {
                     totalLatency={totalLatency}
                     isSelected={selectedHop === hop.id || (!selectedHop && activeStep === i)}
                     onSelect={setSelectedHop}
-                    secondsElapsed={secondsElapsed}
                     isReached={i <= activeStep}
                     isCompleted={hop.type === 'LOCAL' ? (activeStep >= hops.length - 1) : (i <= activeStep)}
                     compact={true}
@@ -1296,7 +876,6 @@ export default function VisualizerPage() {
               <div className="flex-1 overflow-hidden">
                 <HopInspector 
                   hop={currentInspectedHop} 
-                  secondsElapsed={secondsElapsed} 
                   isCompleted={currentInspectedHop ? (currentInspectedHop.type === 'LOCAL' ? (activeStep >= hops.length - 1) : (hops.indexOf(currentInspectedHop) <= activeStep)) : true} 
                 />
               </div>

@@ -28,7 +28,7 @@ const renderIsp = (org) => {
   return org;
 };
 
-export default function HopInspector({ hop, secondsElapsed = 0, isCompleted = true }) {
+export default function HopInspector({ hop, isCompleted = true }) {
   const [showHex, setShowHex] = useState(false);
   const [tcpTip, setTcpTip] = useState(false);
 
@@ -258,7 +258,6 @@ export default function HopInspector({ hop, secondsElapsed = 0, isCompleted = tr
           <RecordTable
             records={hop.response.answers}
             accent={true}
-            secondsElapsed={secondsElapsed}
           />
         </div>
       )}
@@ -272,7 +271,6 @@ export default function HopInspector({ hop, secondsElapsed = 0, isCompleted = tr
           <RecordTable
             records={hop.response.authority}
             accent={false}
-            secondsElapsed={secondsElapsed}
           />
         </div>
       )}
@@ -286,7 +284,6 @@ export default function HopInspector({ hop, secondsElapsed = 0, isCompleted = tr
           <RecordTable
             records={hop.response.additional}
             accent={false}
-            secondsElapsed={secondsElapsed}
           />
         </div>
       )}
